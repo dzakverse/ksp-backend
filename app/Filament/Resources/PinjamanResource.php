@@ -1,0 +1,226 @@
+<?php
+
+namespace App\Filament\Resources;
+
+use App\Filament\Resources\PinjamanResource\Pages;
+use App\Models\Pinjaman;
+use App\Models\User;
+use Filament\Forms;
+use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Grid;
+use Filament\Forms\Components\Section;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Form;
+use Filament\Notifications\Notification;
+use Filament\Resources\Resource;
+use Filament\Tables;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+
+class PinjamanResource extends Resource
+{
+    protected static ?string $model = Pinjaman::class;
+
+    protected static ?string $navigationIcon = 'heroicon-o-currency-dollar';
+
+    protected static ?string $navigationGroup = 'Transaksi';
+
+    protected static ?string $navigationLabel = 'Pinjaman';
+
+    protected static ?string $modelLabel = 'Pinjaman';
+
+    protected static ?string $pluralModelLabel = 'Pinjaman';
+
+    protected static ?int $navigationSort = 3;
+
+    public static function form(Form $form): Form
+    {
+        return $form
+            ->schema([
+                Section::make('Data Pinjaman')
+                    ->schema([
+                        Grid::make(2)->schema([
+                            Select::make('user_id')
+                                ->label('Anggota')
+                                ->options(fn (): array => User::where('role', 'anggota')
+                                    ->orderBy('name')
+                                    ->pluck('name', 'id')
+                                    ->toArray())
+                                ->searchable()
+                                ->preload()
+                                ->required()
+                                ->columnSpanFull(),
+                            TextInput::make('jumlah_pinjaman')
+                                ->label('Jumlah Pinjaman (Rp)')
+                                ->numeric()
+                                ->prefix('Rp')
+                                ->required()
+                                ->minValue(0)
+                                ->reactive()
+                                ->afterStateUpdated(function (Forms\Set $set, Forms\Get $get, ?string $state): void {
+                                    $tenor = (int) $get('tenor_bulan');
+                                    $bunga = (float) $get('suku_bunga_persen');
+                                    if ($tenor > 0) {
+                                        $totalBunga = $state * ($bunga / 100) * ($tenor / 12);
+                                        $angsuran = ($state + $totalBunga) / $tenor;
+                                        $set('angsuran_per_bulan', round($angsuran));
+                                    }
+                                }),
+                            TextInput::make('tenor_bulan')
+                                ->label('Tenor (Bulan)')
+                                ->numeric()
+                                ->required()
+                                ->minValue(1)
+                                ->maxValue(120)
+                                ->reactive()
+                                ->afterStateUpdated(function (Forms\Set $set, Forms\Get $get, ?string $state): void {
+                                    $jumlah = (float) $get('jumlah_pinjaman');
+                                    $bunga = (float) $get('suku_bunga_persen');
+                                    if ($state > 0 && $jumlah > 0) {
+                                        $totalBunga = $jumlah * ($bunga / 100) * ($state / 12);
+                                        $angsuran = ($jumlah + $totalBunga) / $state;
+                                        $set('angsuran_per_bulan', round($angsuran));
+                                    }
+                                }),
+                            TextInput::make('suku_bunga_persen')
+                                ->label('Suku Bunga (% per tahun)')
+                                ->numeric()
+                                ->default(0)
+                                ->minValue(0)
+                                ->maxValue(100)
+                                ->reactive()
+                                ->afterStateUpdated(function (Forms\Set $set, Forms\Get $get, ?string $state): void {
+                                    $jumlah = (float) $get('jumlah_pinjaman');
+                                    $tenor = (int) $get('tenor_bulan');
+                                    if ($tenor > 0 && $jumlah > 0) {
+                                        $totalBunga = $jumlah * ($state / 100) * ($tenor / 12);
+                                        $angsuran = ($jumlah + $totalBunga) / $tenor;
+                                        $set('angsuran_per_bulan', round($angsuran));
+                                    }
+                                }),
+                            TextInput::make('angsuran_per_bulan')
+                                ->label('Angsuran per Bulan (Rp)')
+                                ->numeric()
+                                ->prefix('Rp')
+                                ->required()
+                                ->minValue(0)
+                                ->readOnly(),
+                            Select::make('status')
+                                ->label('Status')
+                                ->options([
+                                    'draf' => 'Draf',
+                                    'menunggu' => 'Menunggu Persetujuan',
+                                    'disetujui' => 'Disetujui',
+                                    'ditolak' => 'Ditolak',
+                                    'lunas' => 'Lunas',
+                                ])
+                                ->required()
+                                ->default('draf'),
+                            Textarea::make('keterangan')
+                                ->label('Keterangan')
+                                ->rows(3),
+                        ]),
+                    ]),
+            ]);
+    }
+
+    public static function table(Table $table): Table
+    {
+        return $table
+            ->columns([
+                TextColumn::make('user.name')
+                    ->label('Anggota')
+                    ->searchable()
+                    ->sortable(),
+                TextColumn::make('jumlah_pinjaman')
+                    ->label('Jumlah Pinjaman')
+                    ->money('IDR')
+                    ->sortable(),
+                TextColumn::make('tenor_bulan')
+                    ->label('Tenor')
+                    ->suffix(' bln')
+                    ->sortable(),
+                TextColumn::make('angsuran_per_bulan')
+                    ->label('Angsuran/Bln')
+                    ->money('IDR'),
+                TextColumn::make('status')
+                    ->label('Status')
+                    ->badge()
+                    ->color(fn (string $state): string => match ($state) {
+                        'draf' => 'gray',
+                        'menunggu' => 'warning',
+                        'disetujui' => 'success',
+                        'ditolak' => 'danger',
+                        'lunas' => 'info',
+                    })
+                    ->formatStateUsing(fn (string $state): string => match ($state) {
+                        'draf' => 'Draf',
+                        'menunggu' => 'Menunggu',
+                        'disetujui' => 'Disetujui',
+                        'ditolak' => 'Ditolak',
+                        'lunas' => 'Lunas',
+                    }),
+                TextColumn::make('created_at')
+                    ->label('Dibuat')
+                    ->dateTime()
+                    ->sortable(),
+            ])
+            ->filters([
+                Tables\Filters\SelectFilter::make('status')
+                    ->label('Status')
+                    ->options([
+                        'draf' => 'Draf',
+                        'menunggu' => 'Menunggu',
+                        'disetujui' => 'Disetujui',
+                        'ditolak' => 'Ditolak',
+                        'lunas' => 'Lunas',
+                    ]),
+                Tables\Filters\SelectFilter::make('user_id')
+                    ->label('Anggota')
+                    ->options(fn (): array => User::where('role', 'anggota')
+                        ->orderBy('name')
+                        ->pluck('name', 'id')
+                        ->toArray())
+                    ->searchable(),
+            ])
+            ->actions([
+                Tables\Actions\EditAction::make(),
+                Tables\Actions\Action::make('bypassApproval')
+                    ->label('Bypass Approval')
+                    ->icon('heroicon-o-check-badge')
+                    ->color('success')
+                    ->requiresConfirmation()
+                    ->modalHeading('Bypass Approval Pinjaman')
+                    ->modalDescription('Anda yakin ingin menyetujui pinjaman ini secara langsung?')
+                    ->modalSubmitActionLabel('Ya, Setujui')
+                    ->visible(fn (Pinjaman $record): bool => in_array($record->status, ['draf', 'menunggu']))
+                    ->action(function (Pinjaman $record): void {
+                        $record->update(['status' => 'disetujui']);
+
+                        Notification::make()
+                            ->title('Pinjaman berhasil disetujui')
+                            ->body("Pinjaman untuk {$record->user->name} telah disetujui langsung (bypass).")
+                            ->success()
+                            ->send();
+                    }),
+                Tables\Actions\DeleteAction::make(),
+            ])
+            ->bulkActions([
+                Tables\Actions\BulkActionGroup::make([
+                    Tables\Actions\DeleteBulkAction::make(),
+                ]),
+            ]);
+    }
+
+    public static function getPages(): array
+    {
+        return [
+            'index' => Pages\ListPinjamans::route('/'),
+            'create' => Pages\CreatePinjaman::route('/create'),
+            'edit' => Pages\EditPinjaman::route('/{record}/edit'),
+        ];
+    }
+}

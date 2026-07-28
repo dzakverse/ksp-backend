@@ -73,11 +73,12 @@ php artisan tinker
 $anggota = \App\Models\User::create([
     'nip' => 'anggota', 'password' => bcrypt('123'), 'nama' => 'Budi Santoso',
     'role' => 'ANGGOTA', 'id_anggota' => 'ANG-2024-001', 'id_keanggotaan' => 'KSP-2024-0891',
-    'tanggal_bergabung' => '2021-01-15', 'nik' => '3273012903910004',
+    'unit_kerja' => 'Sekretariat', 'tanggal_bergabung' => '2021-01-15', 'nik' => '3273012903910004',
     'tempat_lahir' => 'Bandung', 'tanggal_lahir' => '1991-03-29', 'jenis_kelamin' => 'Laki-Laki',
     'alamat' => 'Jl. Gatot Subroto No. 124, Lengkong, Bandung',
     'whatsapp' => '+62 812-3456-7890', 'email' => 'budi.santoso@email.com',
 ]);
+\App\Models\User::create(['nip' => 'anggota2', 'password' => bcrypt('123'), 'nama' => 'Siti Aminah, M.Si', 'role' => 'ANGGOTA', 'unit_kerja' => 'Rehabilitasi Sosial']);
 \App\Models\User::create(['nip' => 'bendahara', 'password' => bcrypt('123'), 'nama' => 'Siti Aminah', 'role' => 'BENDAHARA']);
 \App\Models\User::create(['nip' => 'ketua', 'password' => bcrypt('123'), 'nama' => 'Drs. H. Ahmad', 'role' => 'KETUA']);
 
@@ -93,6 +94,13 @@ $pinjaman = $anggota->pinjamans()->create([
     'alasan' => 'Kebutuhan mendesak', 'status' => 'DISETUJUI',
 ]);
 $pinjaman->cicilans()->create(['cicilan_ke' => 1, 'jumlah' => 458333, 'jatuh_tempo' => '2026-08-01', 'tanggal_bayar' => '2026-08-01', 'status' => 'LUNAS']);
+
+// Pengajuan baru yang masih MENUNGGU verifikasi, biar antrean Bendahara ada isinya
+$anggota2 = \App\Models\User::where('nip', 'anggota2')->first();
+$anggota2->pinjamans()->create([
+    'kode' => 'LN-2026-002', 'jumlah' => 25000000, 'tenor_bulan' => 24,
+    'alasan' => 'Renovasi Rumah', 'status' => 'MENUNGGU',
+]);
 ```
 
 ## 7. Jalankan server
@@ -115,12 +123,20 @@ untuk daftar lengkap endpoint dan halaman FE mana yang memakainya.
 | GET    | /api/dashboard                          | pages/dashboard.jsx (Beranda)           | ANGGOTA      |
 | GET    | /api/simpanan                           | pages/simpananku.jsx                    | ANGGOTA      |
 | GET    | /api/pinjaman                           | pages/pinjaman.jsx                      | ANGGOTA      |
-| GET    | /api/profile                            | pages/profil.jsx                        | ANGGOTA      |
+| GET    | /api/profile                            | pages/profil.jsx (semua role)           | semua login  |
 | POST   | /api/pinjaman                           | pages/ajukan.jsx                        | ANGGOTA      |
-| GET    | /api/admin/pinjaman                     | pages/admin/VerifikasiPinjaman.jsx      | BENDAHARA/KETUA |
-| POST   | /api/admin/pinjaman/{id}/verifikasi     | pages/admin/VerifikasiDetail.jsx        | BENDAHARA/KETUA |
-| POST   | /api/ketua/pinjaman/{id}/persetujuan    | pages/ketua/PersetujuanPinjaman.jsx     | KETUA        |
+| POST   | /api/change-password                    | UbahPassword.jsx (semua role)           | semua login  |
+| GET    | /api/admin/dashboard                    | bendahara/DashboardBendahara.jsx        | BENDAHARA/KETUA |
+| GET    | /api/admin/anggota                      | bendahara/DataAnggota.jsx               | BENDAHARA/KETUA |
+| GET    | /api/admin/anggota/{id}                 | bendahara/DetailAnggota.jsx             | BENDAHARA/KETUA |
+| POST   | /api/admin/anggota/{id}/simpanan        | bendahara/DetailAnggota.jsx (form)      | BENDAHARA/KETUA |
+| PATCH  | /api/admin/anggota/{id}/status          | bendahara/DetailAnggota.jsx (toggle)    | BENDAHARA/KETUA |
+| GET    | /api/admin/pinjaman                     | bendahara/VerifikasiPinjaman.jsx        | BENDAHARA/KETUA |
+| GET    | /api/admin/pinjaman/{id}                | bendahara/VerifikasiDetail.jsx          | BENDAHARA/KETUA |
+| POST   | /api/admin/pinjaman/{id}/verifikasi     | bendahara/VerifikasiDetail.jsx          | BENDAHARA/KETUA |
+| POST   | /api/ketua/pinjaman/{id}/persetujuan    | ketua/PersetujuanPinjaman.jsx           | KETUA        |
 
-Halaman lain (DataAnggota, KendaliKebijakan, EmergencyBypass, PengurusAnggota, dll)
-belum dibuatkan endpoint-nya — pola controller di atas bisa langsung dicontek/di-copy
-untuk bikin yang baru sesuai kebutuhan.
+Halaman Ketua yang belum dibuatkan endpoint-nya (menyusul di tahap berikutnya):
+`EmergencyBypass.jsx`, `KendaliKebijakan.jsx`, `PengurusAnggota.jsx`, tab "Bypass" di
+`PersetujuanPinjaman.jsx`, dan Audit Log Tracker di `DashboardKetua.jsx`. Pola controller
+di atas bisa langsung dicontek untuk bikin endpoint-endpoint tersebut nanti.
