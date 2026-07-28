@@ -5,14 +5,23 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
+use App\Models\User;
+use App\Models\Simpanan;
+use App\Models\Pinjaman;
 
 class DashboardController extends Controller
 {
-    // GET /api/dashboard -> pages/dashboard.jsx (Beranda)
+    /**
+     * GET /api/dashboard -> Dashboard Anggota
+     */
     public function index(Request $request)
     {
         try {
             $user = $request->user();
+
+            if (!$user) {
+                return response()->json(['message' => 'Unauthenticated'], 401);
+            }
 
             // Hitung Sub Saldo Simpanan
             $totalPokok = $user->simpanans()->where('jenis', 'POKOK')->where('tipe', 'SETOR')->sum('jumlah') ?? 0;
@@ -23,7 +32,6 @@ class DashboardController extends Controller
 
             // Gabungkan aktivitas simpanan
             $aktivitasSimpanan = $user->simpanans()->get()->map(function ($s) {
-                // Pastikan format tanggal aman diparse
                 $tgl = $s->tanggal ? Carbon::parse($s->tanggal)->toDateString() : date('Y-m-d');
                 
                 return [
@@ -33,7 +41,7 @@ class DashboardController extends Controller
                     'kategori' => $s->jenis,
                     'jumlah' => (float) $s->jumlah,
                     'arah' => $s->tipe === 'SETOR' ? 'in' : 'out',
-                    'status' => $s->status,
+                    'status' => $s->status ?? 'BERHASIL',
                 ];
             });
 
@@ -57,7 +65,7 @@ class DashboardController extends Controller
                 ];
             });
 
-            // Urutkan & gabungkan
+            // Urutkan & gabungkan aktivitas
             $aktivitas = $aktivitasSimpanan->concat($aktivitasPinjaman)
                 ->sortByDesc('tanggal')
                 ->values()
@@ -79,12 +87,102 @@ class DashboardController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            // Tangkap exception agar terlihat detail error jika masih ada yang kurang
             return response()->json([
                 'status' => 'error',
                 'message' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine()
+            ], 500);
+        }
+    }
+
+    /**
+     * GET /api/admin/dashboard -> Dashboard Admin / Bendahara / Ketua
+     */
+public function adminIndex(Request $request)
+    {
+        try {
+            // 1. Total Simpanan Anggota berdasarkan jenis
+            $totalPokok = Simpanan::where('jenis', 'POKOK')->where('tipe', 'SETOR')->sum('jumlah') ?? 0;
+            $totalWajib = Simpanan::where('jenis', 'WAJIB')->where('tipe', 'SETOR')->sum('jumlah') ?? 0;
+            
+            $sukarelaSetor = Simpanan::where('jenis', 'SUKARELA')->where('tipe', 'SETOR')->sum('jumlah') ?? 0;
+            $sukarelaTarik = Simpanan::where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->sum('jumlah') ?? 0;
+            $totalSukarela = $sukarelaSetor - $sukarelaTarik;
+
+            $totalSimpananAnggota = $totalPokok + $totalWajib + $totalSukarela;
+
+            // 2. Total Pinjaman Aktif (Sisa pokok pinjaman yang disetujui / belum lunas)
+            $totalPinjamanAktif = Pinjaman::whereIn('status', ['DISETUJUI', 'DIVERIFIKASI'])
+                ->sum('jumlah') ?? 0;
+
+            // 3. Total Kas Koperasi (Simpanan Anggota - Pinjaman Aktif)
+            $totalKas = $totalSimpananAnggota - $totalPinjamanAktif;
+
+            // 4. Ambil 5 Transaksi Simpanan Terbaru
+            $simpananTerbaru = Simpanan::with('user')
+                ->latest()
+                ->take(5)
+                ->get()
+                ->map(function ($s) {
+                    return [
+                        'jenis' => 'Simpanan ' . ucfirst(strtolower($s->jenis)),
+                        'anggota' => $s->user->name ?? 'Anggota',
+                        'nip' => $s->user->no_anggota ?? 'N/A',
+                        'kategori' => $s->tipe === 'SETOR' ? 'SETORAN' : 'PENARIKAN',
+                        'waktu' => $s->created_at ? $s->created_at->diffForHumans() : '-',
+                        'jumlah' => (float) $s->jumlah,
+                        'status' => 'Berhasil',
+                        'tipe' => $s->tipe === 'SETOR' ? 'in' : 'out',
+                        'created_at' => $s->created_at,
+                    ];
+                });
+
+            // 5. Ambil 5 Pengajuan Pinjaman Terbaru
+            $pinjamanTerbaru = Pinjaman::with('user')
+                ->latest()
+                ->take(5)
+                ->get()
+                ->map(function ($p) {
+                    $statusFormatted = $p->status === 'DISETUJUI' ? 'Berhasil' : 'Proses';
+                    $tipe = $p->status === 'PENDING' ? 'pending' : 'out';
+
+                    return [
+                        'jenis' => 'Pengajuan Pinjaman',
+                        'anggota' => $p->user->name ?? 'Anggota',
+                        'nip' => $p->user->no_anggota ?? 'N/A',
+                        'kategori' => 'PINJAMAN',
+                        'waktu' => $p->created_at ? $p->created_at->diffForHumans() : '-',
+                        'jumlah' => (float) $p->jumlah,
+                        'status' => $statusFormatted,
+                        'tipe' => $tipe,
+                        'created_at' => $p->created_at,
+                    ];
+                });
+
+            // Gabungkan dan urutkan 5 aktivitas paling baru secara global
+            $aktivitasTerbaru = $simpananTerbaru->concat($pinjamanTerbaru)
+                ->sortByDesc('created_at')
+                ->take(5)
+                ->values();
+
+            return response()->json([
+                'status' => 'success',
+                'total_kas' => (float) $totalKas,
+                'total_simpanan_anggota' => (float) $totalSimpananAnggota,
+                'total_pinjaman_aktif' => (float) $totalPinjamanAktif,
+                'sub_saldo' => [
+                    'pokok' => (float) $totalPokok,
+                    'wajib' => (float) $totalWajib,
+                    'sukarela' => (float) $totalSukarela,
+                ],
+                'aktivitas_terbaru' => $aktivitasTerbaru,
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
             ], 500);
         }
     }
