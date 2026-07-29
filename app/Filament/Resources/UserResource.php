@@ -2,24 +2,22 @@
 
 namespace App\Filament\Resources;
 
-use App\Filament\Actions\ChangePasswordAction;
 use App\Filament\Resources\UserResource\Pages;
 use App\Models\User;
 use Filament\Forms;
+use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Grid;
 use Filament\Forms\Components\Section;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Form;
-use Filament\Forms\Get;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
-use Filament\Tables\Columns\IconColumn;
+use Filament\Tables\Columns\BadgeColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
-use Illuminate\Support\Str;
 
 class UserResource extends Resource
 {
@@ -41,44 +39,53 @@ class UserResource extends Resource
     {
         return $form
             ->schema([
-                Section::make('Data Pengguna')
+                Section::make('Data Utama Pengguna')
                     ->schema([
                         Grid::make(2)->schema([
-                            TextInput::make('name')
+                            TextInput::make('nama')
                                 ->label('Nama Lengkap')
                                 ->required()
                                 ->maxLength(255),
+
                             TextInput::make('nip')
-                                ->label('NIP')
+                                ->label('NIP / Nomor Induk')
                                 ->required()
                                 ->unique(ignoreRecord: true)
-                                ->maxLength(18)
+                                ->maxLength(20)
                                 ->validationMessages(['unique' => 'NIP sudah terdaftar']),
+
                             Select::make('role')
-                                ->label('Role')
+                                ->label('Role Akses')
                                 ->options([
-                                    'super_admin' => 'Super Admin',
-                                    'ketua' => 'Ketua',
-                                    'bendahara' => 'Bendahara',
-                                    'anggota' => 'Anggota',
+                                    'SUPER_ADMIN' => 'Super Admin',
+                                    'KETUA' => 'Ketua',
+                                    'BENDAHARA' => 'Bendahara',
+                                    'ANGGOTA' => 'Anggota',
                                 ])
                                 ->required()
-                                ->default('anggota'),
+                                ->default('ANGGOTA'),
+
                             TextInput::make('email')
                                 ->label('Email')
                                 ->email()
                                 ->maxLength(255),
-                            TextInput::make('telepon')
-                                ->label('No. Telepon')
+
+                            TextInput::make('whatsapp')
+                                ->label('No. WhatsApp')
                                 ->tel()
                                 ->maxLength(20),
+
+                            DatePicker::make('tanggal_bergabung')
+                                ->label('Tanggal Bergabung')
+                                ->default(now()),
                         ]),
+
                         Textarea::make('alamat')
-                            ->label('Alamat')
+                            ->label('Alamat Lengkap')
                             ->rows(3),
                     ])->columns(1),
 
-                Section::make('Akun')
+                Section::make('Keamanan Akun')
                     ->schema([
                         TextInput::make('password')
                             ->label('Password')
@@ -95,64 +102,74 @@ class UserResource extends Resource
     {
         return $table
             ->columns([
-                TextColumn::make('name')
+                TextColumn::make('nama')
                     ->label('Nama')
                     ->searchable()
                     ->sortable(),
+
                 TextColumn::make('nip')
                     ->label('NIP')
                     ->searchable()
                     ->sortable(),
-                TextColumn::make('role')
+
+                BadgeColumn::make('role')
                     ->label('Role')
-                    ->badge()
-                    ->color(fn (string $state): string => match ($state) {
-                        'super_admin' => 'danger',
-                        'ketua' => 'warning',
-                        'bendahara' => 'info',
-                        'anggota' => 'success',
-                    })
+                    ->colors([
+                        'danger' => 'SUPER_ADMIN',
+                        'warning' => 'KETUA',
+                        'info' => 'BENDAHARA',
+                        'success' => 'ANGGOTA',
+                    ])
                     ->formatStateUsing(fn (string $state): string => match ($state) {
-                        'super_admin' => 'Super Admin',
-                        'ketua' => 'Ketua',
-                        'bendahara' => 'Bendahara',
-                        'anggota' => 'Anggota',
+                        'SUPER_ADMIN' => 'Super Admin',
+                        'KETUA' => 'Ketua',
+                        'BENDAHARA' => 'Bendahara',
+                        'ANGGOTA' => 'Anggota',
+                        default => $state,
                     }),
+
                 TextColumn::make('email')
                     ->label('Email')
+                    ->placeholder('-')
                     ->searchable(),
-                TextColumn::make('telepon')
-                    ->label('Telepon'),
+
+                TextColumn::make('whatsapp')
+                    ->label('WhatsApp')
+                    ->placeholder('-'),
+
                 TextColumn::make('created_at')
                     ->label('Dibuat')
-                    ->dateTime()
+                    ->dateTime('d M Y')
                     ->sortable(),
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('role')
                     ->label('Role')
                     ->options([
-                        'super_admin' => 'Super Admin',
-                        'ketua' => 'Ketua',
-                        'bendahara' => 'Bendahara',
-                        'anggota' => 'Anggota',
+                        'SUPER_ADMIN' => 'Super Admin',
+                        'KETUA' => 'Ketua',
+                        'BENDAHARA' => 'Bendahara',
+                        'ANGGOTA' => 'Anggota',
                     ]),
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),
+
+                // FITUR GANTI PASSWORD DIRECT BY SUPER ADMIN
                 Tables\Actions\Action::make('changePassword')
                     ->label('Ganti Password')
                     ->icon('heroicon-o-key')
                     ->color('warning')
-                    ->modalHeading('Ganti Password')
-                    ->modalSubmitActionLabel('Simpan Password')
+                    ->modalHeading('Ganti Password User')
+                    ->modalSubmitActionLabel('Simpan Password Baru')
                     ->form(fn (User $record): array => [
                         TextInput::make('new_password')
                             ->label('Password Baru')
                             ->password()
                             ->revealable()
                             ->required()
-                            ->minLength(8),
+                            ->minLength(6),
+
                         TextInput::make('new_password_confirmation')
                             ->label('Konfirmasi Password Baru')
                             ->password()
@@ -167,10 +184,12 @@ class UserResource extends Resource
 
                         Notification::make()
                             ->title('Password berhasil diubah')
+                            ->body("Password untuk {$record->nama} telah diperbarui.")
                             ->success()
                             ->send();
                     })
                     ->visible(fn (User $record): bool => $record->id !== auth()->id()),
+
                 Tables\Actions\DeleteAction::make()
                     ->visible(fn (User $record): bool => $record->id !== auth()->id()),
             ])

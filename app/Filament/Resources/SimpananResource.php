@@ -15,6 +15,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables;
+use Filament\Tables\Columns\BadgeColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -44,36 +45,63 @@ class SimpananResource extends Resource
                         Grid::make(2)->schema([
                             Select::make('user_id')
                                 ->label('Anggota')
-                                ->options(fn (): array => User::where('role', 'anggota')
-                                    ->orderBy('name')
-                                    ->pluck('name', 'id')
+                                ->options(fn (): array => User::where('role', 'ANGGOTA')
+                                    ->orderBy('nama')
+                                    ->pluck('nama', 'id')
                                     ->toArray())
                                 ->searchable()
                                 ->preload()
                                 ->required()
                                 ->columnSpanFull(),
+
                             Select::make('jenis')
                                 ->label('Jenis Simpanan')
                                 ->options([
-                                    'pokok' => 'Simpanan Pokok',
-                                    'wajib' => 'Simpanan Wajib',
-                                    'sukarela' => 'Simpanan Sukarela',
+                                    'POKOK' => 'Simpanan Pokok',
+                                    'WAJIB' => 'Simpanan Wajib',
+                                    'SUKARELA' => 'Simpanan Sukarela',
                                 ])
                                 ->required(),
+
+                            Select::make('tipe')
+                                ->label('Tipe Transaksi')
+                                ->options([
+                                    'SETOR' => 'Setor',
+                                    'TARIK' => 'Tarik',
+                                ])
+                                ->default('SETOR')
+                                ->required(),
+
                             TextInput::make('jumlah')
                                 ->label('Jumlah (Rp)')
                                 ->numeric()
                                 ->prefix('Rp')
                                 ->required()
                                 ->minValue(0),
+
                             DatePicker::make('tanggal')
-                                ->label('Tanggal')
+                                ->label('Tanggal Transaksi')
                                 ->required()
                                 ->default(now()),
+
+                            Select::make('status')
+                                ->label('Status Transaksi')
+                                ->options([
+                                    'BERHASIL' => 'Berhasil',
+                                    'PENDING' => 'Pending',
+                                    'GAGAL' => 'Gagal',
+                                ])
+                                ->default('BERHASIL')
+                                ->required(),
+
                             Textarea::make('keterangan')
                                 ->label('Keterangan')
                                 ->rows(2)
-                                ->placeholder('Contoh: Simpanan wajib bulan Januari 2026'),
+                                ->placeholder('Contoh: Simpanan wajib bulan Juli 2026')
+                                ->columnSpanFull(),
+
+                            Forms\Components\Hidden::make('created_by')
+                                ->default(fn () => auth()->id()),
                         ]),
                     ]),
             ]);
@@ -83,54 +111,77 @@ class SimpananResource extends Resource
     {
         return $table
             ->columns([
-                TextColumn::make('user.name')
+                TextColumn::make('user.nama')
                     ->label('Anggota')
                     ->searchable()
                     ->sortable(),
-                TextColumn::make('jenis')
+
+                BadgeColumn::make('jenis')
                     ->label('Jenis')
-                    ->badge()
-                    ->color(fn (string $state): string => match ($state) {
-                        'pokok' => 'success',
-                        'wajib' => 'warning',
-                        'sukarela' => 'info',
-                    })
+                    ->colors([
+                        'primary' => 'POKOK',
+                        'warning' => 'WAJIB',
+                        'success' => 'SUKARELA',
+                    ])
                     ->formatStateUsing(fn (string $state): string => match ($state) {
-                        'pokok' => 'Pokok',
-                        'wajib' => 'Wajib',
-                        'sukarela' => 'Sukarela',
+                        'POKOK' => 'Pokok',
+                        'WAJIB' => 'Wajib',
+                        'SUKARELA' => 'Sukarela',
+                        default => $state,
                     }),
+
+                BadgeColumn::make('tipe')
+                    ->label('Tipe')
+                    ->colors([
+                        'success' => 'SETOR',
+                        'danger' => 'TARIK',
+                    ]),
+
                 TextColumn::make('jumlah')
                     ->label('Jumlah')
-                    ->money('IDR')
+                    ->money('IDR', locale: 'id')
                     ->sortable(),
+
                 TextColumn::make('tanggal')
                     ->label('Tanggal')
                     ->date('d M Y')
                     ->sortable(),
+
+                BadgeColumn::make('status')
+                    ->label('Status')
+                    ->colors([
+                        'success' => 'BERHASIL',
+                        'warning' => 'PENDING',
+                        'danger' => 'GAGAL',
+                    ]),
+
                 TextColumn::make('keterangan')
                     ->label('Keterangan')
-                    ->limit(50),
-                TextColumn::make('created_at')
-                    ->label('Dicatat')
-                    ->dateTime()
-                    ->sortable(),
+                    ->limit(30)
+                    ->placeholder('-'),
+
+                TextColumn::make('createdBy.nama')
+                    ->label('Dicatat Oleh')
+                    ->placeholder('Sistem / Mandiri'),
             ])
+            ->defaultSort('tanggal', 'desc')
             ->filters([
                 Tables\Filters\SelectFilter::make('jenis')
                     ->label('Jenis Simpanan')
                     ->options([
-                        'pokok' => 'Pokok',
-                        'wajib' => 'Wajib',
-                        'sukarela' => 'Sukarela',
+                        'POKOK' => 'Pokok',
+                        'WAJIB' => 'Wajib',
+                        'SUKARELA' => 'Sukarela',
                     ]),
+
                 Tables\Filters\SelectFilter::make('user_id')
                     ->label('Anggota')
-                    ->options(fn (): array => User::where('role', 'anggota')
-                        ->orderBy('name')
-                        ->pluck('name', 'id')
+                    ->options(fn (): array => User::where('role', 'ANGGOTA')
+                        ->orderBy('nama')
+                        ->pluck('nama', 'id')
                         ->toArray())
                     ->searchable(),
+
                 Tables\Filters\Filter::make('tanggal')
                     ->label('Periode')
                     ->form([
