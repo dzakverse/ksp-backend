@@ -51,7 +51,7 @@ class CustomLogin extends Login
 
         $user = auth()->user();
 
-        if ($user->role !== 'super_admin') {
+        if ($user->role !== 'SUPER_ADMIN') {
             auth()->logout();
 
             Notification::make()
