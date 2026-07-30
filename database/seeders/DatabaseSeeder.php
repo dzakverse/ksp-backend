@@ -48,5 +48,40 @@ class DatabaseSeeder extends Seeder
                 'status_keanggotaan' => 'AKTIF',
             ]
         );
+
+        // Buat akun sampel Anggota (agar DetailAnggota/Simpanan/Pinjaman ada datanya saat testing)
+        $anggota = User::firstOrCreate(
+            ['nip' => '199001012024011004'],
+            [
+                'nama' => 'Budi Santoso',
+                'role' => 'ANGGOTA',
+                'id_anggota' => 'ANG-2024-001',
+                'id_keanggotaan' => 'KSP-2024-0891',
+                'unit_kerja' => 'Sekretariat',
+                'tanggal_bergabung' => '2024-01-15',
+                'email' => 'budi.santoso@email.com',
+                'password' => Hash::make('password123'),
+                'status_keanggotaan' => 'AKTIF',
+            ]
+        );
+
+        if ($anggota->simpanans()->count() === 0) {
+            $anggota->simpanans()->create(['jenis' => 'POKOK', 'tipe' => 'SETOR', 'jumlah' => 500000, 'tanggal' => '2024-01-15', 'keterangan' => 'Setoran awal keanggotaan']);
+            $anggota->simpanans()->create(['jenis' => 'WAJIB', 'tipe' => 'SETOR', 'jumlah' => 250000, 'tanggal' => now()->toDateString(), 'keterangan' => 'Simpanan wajib bulan berjalan']);
+            $anggota->simpanans()->create(['jenis' => 'SUKARELA', 'tipe' => 'SETOR', 'jumlah' => 1000000, 'tanggal' => now()->toDateString()]);
+        }
+
+        if ($anggota->pinjamans()->count() === 0) {
+            $anggota->pinjamans()->create([
+                'kode' => 'LN-2026-001',
+                'jumlah' => 5000000,
+                'tenor_bulan' => 12,
+                'alasan' => 'Kebutuhan mendesak',
+                'status' => 'MENUNGGU',
+            ]);
+        }
+
+        // Nilai default Kendali Kebijakan (Ketua)
+        \App\Models\Kebijakan::firstOrCreate([]);
     }
 }
