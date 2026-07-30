@@ -13,7 +13,6 @@ class PinjamanController extends Controller
     {
         $riwayat = $request->user()->pinjamans()->orderByDesc('created_at')->get();
 
-        // Pinjaman "aktif" = yang sudah DISETUJUI dan masih ada sisa cicilan belum lunas
         $aktif = $riwayat->firstWhere('status', 'DISETUJUI');
         $pinjamanAktif = null;
 
@@ -56,12 +55,72 @@ class PinjamanController extends Controller
         return response()->json($pinjaman, 201);
     }
 
-    // GET /api/admin/pinjaman -> semua pengajuan, buat Bendahara (pages/admin/VerifikasiPinjaman.jsx)
-    public function indexAll()
+    // GET /api/admin/pinjaman -> dipakai Bendahara (VerifikasiPinjaman.jsx) & Ketua (PersetujuanPinjaman.jsx)
+    // Query params: status (filter tunggal, mis. MENUNGGU / DISETUJUI_BENDAHARA), search, sort, page
+    public function indexAll(Request $request)
     {
-        return response()->json(
-            Pinjaman::with('user')->orderByDesc('created_at')->get()
-        );
+        $query = Pinjaman::with('user');
+
+        if ($status = $request->query('status')) {
+            $query->where('status', $status);
+        }
+
+        if ($search = $request->query('search')) {
+            $query->whereHas('user', fn ($q) => $q->where('nama', 'like', "%{$search}%")->orWhere('nip', 'like', "%{$search}%"));
+        }
+
+        match ($request->query('sort', 'terbaru')) {
+            'terlama' => $query->oldest(),
+            'nominal' => $query->orderByDesc('jumlah'),
+            default => $query->latest(),
+        };
+
+        // Jika status difilter -> kembalikan sebagai antrean (dipaginate).
+        // Jika tidak -> kembalikan snapshot antrean MENUNGGU + riwayat gabungan (dipakai Bendahara).
+        if ($status) {
+            $antrean = $query->paginate(10, ['*'], 'antrean_page');
+
+            return response()->json([
+                'antrean' => $antrean,
+                'antrean_count' => Pinjaman::where('status', $status)->count(),
+                'riwayat' => Pinjaman::with('user')
+                    ->whereIn('status', ['DISETUJUI', 'DITOLAK'])
+                    ->latest()->take(20)->get(),
+            ]);
+        }
+
+        $antrean = (clone $query)->where('status', 'MENUNGGU')->paginate(10, ['*'], 'antrean_page');
+        $riwayat = (clone $query)->whereIn('status', ['DISETUJUI_BENDAHARA', 'DISETUJUI', 'DITOLAK'])
+            ->take(20)->get();
+
+        return response()->json([
+            'antrean' => $antrean,
+            'antrean_count' => Pinjaman::where('status', 'MENUNGGU')->count(),
+            'riwayat' => $riwayat,
+        ]);
+    }
+
+    // GET /api/admin/pinjaman/{pinjaman} -> pages/admin/VerifikasiDetail.jsx
+    public function show(Pinjaman $pinjaman)
+    {
+        $pinjaman->load('user');
+
+        // Simulasi cicilan sederhana (bunga flat). TODO: hubungkan ke tabel kebijakan
+        // (lihat KebijakanController) begitu nilainya ingin dibuat dinamis oleh Ketua.
+        $bungaPersen = 0.01; // 1% flat/bulan
+        $biayaAdmin = 15000;
+        $pokokBulanan = $pinjaman->tenor_bulan > 0 ? $pinjaman->jumlah / $pinjaman->tenor_bulan : 0;
+        $bunga = $pinjaman->jumlah * $bungaPersen;
+
+        return response()->json([
+            'pinjaman' => $pinjaman,
+            'simulasi' => [
+                'pokok_bulanan' => round($pokokBulanan),
+                'bunga' => round($bunga),
+                'biaya_admin' => $biayaAdmin,
+                'total_per_bulan' => round($pokokBulanan + $bunga + $biayaAdmin),
+            ],
+        ]);
     }
 
     // POST /api/admin/pinjaman/{id}/verifikasi -> Bendahara verifikasi (VerifikasiDetail.jsx)
@@ -88,7 +147,41 @@ class PinjamanController extends Controller
             'catatan_verifikasi' => 'nullable|string',
         ]);
 
-        $pinjaman->update($validated);
+        $pinjaman->update([
+            ...$validated,
+            'diverifikasi_oleh' => $request->user()->id,
+        ]);
+
+        return response()->json($pinjaman);
+    }
+
+    // GET /api/ketua/pinjaman/bypass-queue -> pages/ketua/EmergencyBypass.jsx
+    // Ambil 1 pengajuan MENUNGGU tertua (dianggap paling mendesak/lama diproses)
+    public function bypassQueue()
+    {
+        $tertua = Pinjaman::with('user')->where('status', 'MENUNGGU')->oldest()->first();
+        $totalMenunggu = Pinjaman::where('status', 'MENUNGGU')->count();
+
+        return response()->json([
+            'urgent' => $tertua,
+            'total_menunggu' => $totalMenunggu,
+        ]);
+    }
+
+    // POST /api/ketua/pinjaman/{id}/bypass -> eksekusi Emergency Bypass (skip semua tahap verifikasi)
+    public function bypass(Request $request, Pinjaman $pinjaman)
+    {
+        $validated = $request->validate([
+            'catatan_verifikasi' => 'nullable|string',
+        ]);
+
+        $pinjaman->update([
+            'status' => 'DISETUJUI',
+            'is_bypassed' => true,
+            'bypassed_by' => $request->user()->id,
+            'diverifikasi_oleh' => $request->user()->id,
+            'catatan_verifikasi' => $validated['catatan_verifikasi'] ?? 'Disetujui via Emergency Bypass Ketua',
+        ]);
 
         return response()->json($pinjaman);
     }
