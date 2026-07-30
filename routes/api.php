@@ -4,7 +4,9 @@ use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\Api\AnggotaController;
 use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\DashboardController; // Single Controller untuk Anggota & Admin
+use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\KebijakanController;
+use App\Http\Controllers\Api\PengurusController;
 use App\Http\Controllers\Api\PinjamanController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\SimpananController;
@@ -25,9 +27,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/pinjaman', [PinjamanController::class, 'store']);
     Route::get('/profile', [ProfileController::class, 'show']);
 
-    // ---- BENDAHARA (KETUA juga boleh lihat) ----
+    // ---- BENDAHARA (KETUA juga boleh akses) ----
     Route::middleware('role:BENDAHARA,KETUA')->prefix('admin')->group(function () {
-        // DIUBAH: Arahkan ke method adminIndex di DashboardController
         Route::get('/dashboard', [DashboardController::class, 'adminIndex']);
 
         Route::get('/anggota', [AnggotaController::class, 'index']);
@@ -43,5 +44,18 @@ Route::middleware('auth:sanctum')->group(function () {
     // ---- KETUA only ----
     Route::middleware('role:KETUA')->prefix('ketua')->group(function () {
         Route::post('/pinjaman/{pinjaman}/persetujuan', [PinjamanController::class, 'persetujuanKetua']);
+
+        // Emergency Bypass
+        Route::get('/pinjaman/bypass-queue', [PinjamanController::class, 'bypassQueue']);
+        Route::post('/pinjaman/{pinjaman}/bypass', [PinjamanController::class, 'bypass']);
+
+        // Kendali Kebijakan
+        Route::get('/kebijakan', [KebijakanController::class, 'show']);
+        Route::put('/kebijakan', [KebijakanController::class, 'update']);
+
+        // Pengurus & Anggota
+        Route::get('/pengurus', [PengurusController::class, 'index']);
+        Route::post('/pengurus', [PengurusController::class, 'store']);
+        Route::patch('/pengurus/{pengurus}/status', [PengurusController::class, 'updateStatus']);
     });
 });
