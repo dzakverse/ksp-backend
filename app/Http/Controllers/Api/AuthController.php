@@ -10,7 +10,7 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    // POST /api/login  -> ganti logika usersData.find() di FE dengan ini
+    // POST /api/login
     public function login(Request $request)
     {
         $validated = $request->validate([
@@ -26,7 +26,13 @@ class AuthController extends Controller
             ]);
         }
 
-        // Buat token asli (bukan dummy-token lagi)
+        // Cegah login jika akun sudah dinonaktifkan (mis. oleh Bendahara/Ketua/Super Admin)
+        if ($user->status_keanggotaan === 'NONAKTIF') {
+            throw ValidationException::withMessages([
+                'nip' => ['Akun ini sudah dinonaktifkan. Hubungi pengurus koperasi.'],
+            ]);
+        }
+
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
@@ -40,7 +46,7 @@ class AuthController extends Controller
         ]);
     }
 
-    // GET /api/me -> untuk validasi token & ambil ulang data user saat refresh
+    // GET /api/me
     public function me(Request $request)
     {
         return response()->json($request->user());
@@ -51,5 +57,29 @@ class AuthController extends Controller
     {
         $request->user()->currentAccessToken()->delete();
         return response()->json(['message' => 'Logged out']);
+    }
+
+    // POST /api/change-password -> pages/admin/UbahPassword.jsx, ketua/UbahPasswordKetua.jsx
+    public function changePassword(Request $request)
+    {
+        $validated = $request->validate([
+            'password_lama' => 'required|string',
+            'password_baru' => 'required|string|min:8',
+        ]);
+
+        $user = $request->user();
+
+        if (! Hash::check($validated['password_lama'], $user->password)) {
+            throw ValidationException::withMessages([
+                'password_lama' => ['Password saat ini salah.'],
+            ]);
+        }
+
+        $user->update(['password' => $validated['password_baru']]); // auto-hashed via cast di User model
+
+        // Cabut semua token supaya wajib login ulang di semua device
+        $user->tokens()->delete();
+
+        return response()->json(['message' => 'Password berhasil diperbarui. Silakan login kembali.']);
     }
 }
