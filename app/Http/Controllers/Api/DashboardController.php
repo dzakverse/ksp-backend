@@ -113,7 +113,7 @@ public function adminIndex(Request $request)
             $totalSimpananAnggota = $totalPokok + $totalWajib + $totalSukarela;
 
             // 2. Total Pinjaman Aktif (Sisa pokok pinjaman yang disetujui / belum lunas)
-            $totalPinjamanAktif = Pinjaman::whereIn('status', ['DISETUJUI', 'DIVERIFIKASI'])
+            $totalPinjamanAktif = Pinjaman::where('status', 'DISETUJUI')
                 ->sum('jumlah') ?? 0;
 
             // 3. Total Kas Koperasi (Simpanan Anggota - Pinjaman Aktif)
@@ -127,8 +127,8 @@ public function adminIndex(Request $request)
                 ->map(function ($s) {
                     return [
                         'jenis' => 'Simpanan ' . ucfirst(strtolower($s->jenis)),
-                        'anggota' => $s->user->name ?? 'Anggota',
-                        'nip' => $s->user->no_anggota ?? 'N/A',
+                        'anggota' => $s->user->nama ?? 'Anggota',
+                        'nip' => $s->user->nip ?? 'N/A',
                         'kategori' => $s->tipe === 'SETOR' ? 'SETORAN' : 'PENARIKAN',
                         'waktu' => $s->created_at ? $s->created_at->diffForHumans() : '-',
                         'jumlah' => (float) $s->jumlah,
@@ -149,8 +149,8 @@ public function adminIndex(Request $request)
 
                     return [
                         'jenis' => 'Pengajuan Pinjaman',
-                        'anggota' => $p->user->name ?? 'Anggota',
-                        'nip' => $p->user->no_anggota ?? 'N/A',
+                        'anggota' => $p->user->nama ?? 'Anggota',
+                        'nip' => $p->user->nip ?? 'N/A',
                         'kategori' => 'PINJAMAN',
                         'waktu' => $p->created_at ? $p->created_at->diffForHumans() : '-',
                         'jumlah' => (float) $p->jumlah,
