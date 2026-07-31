@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Filament\Models\Contracts\FilamentUser;
+use Filament\Models\Contracts\HasName; // <-- Sudah ada
 use Filament\Panel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -10,7 +11,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-class User extends Authenticatable implements FilamentUser
+class User extends Authenticatable implements FilamentUser, HasName // <-- TAMBAHKAN HasName DI SINI
 {
     use HasApiTokens, HasFactory, Notifiable;
 
@@ -48,6 +49,15 @@ class User extends Authenticatable implements FilamentUser
             'tanggal_bergabung' => 'date',
             'tanggal_lahir' => 'date',
         ];
+    }
+
+    /**
+     * Interface Method dari HasName:
+     * Menyilakan Filament mengambil nama user dari kolom 'nama'
+     */
+    public function getFilamentName(): string
+    {
+        return $this->nama ?? 'User KSP';
     }
 
     /**
