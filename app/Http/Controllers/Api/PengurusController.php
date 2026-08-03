@@ -18,7 +18,7 @@ class PengurusController extends Controller
             $query->where(fn ($q) => $q->where('nama', 'like', "%{$search}%")->orWhere('nip', 'like', "%{$search}%"));
         }
 
-        return respoanse()->json(
+        return response()->json(
             $query->orderBy('nama')->get(['id', 'nama', 'nip', 'status_keanggotaan', 'created_at'])
         );
     }

@@ -152,7 +152,7 @@ class PinjamanResource extends Resource
             ->columns([
                 TextColumn::make('kode')
                     ->label('Kode')
-                    ->bold()
+                    ->weight('bold')
                     ->searchable(),
 
                 TextColumn::make('user.nama')
