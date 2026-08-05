@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AnggotaController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\KasController;
 use App\Http\Controllers\Api\KebijakanController;
 use App\Http\Controllers\Api\PengurusController;
 use App\Http\Controllers\Api\PinjamanController;
@@ -23,9 +24,14 @@ Route::middleware('auth:sanctum')->group(function () {
     // ---- ANGGOTA (semua role bisa akses punya sendiri) ----
     Route::get('/dashboard', [DashboardController::class, 'index']);
     Route::get('/simpanan', [SimpananController::class, 'index']);
+    Route::post('/simpanan/tarik', [SimpananController::class, 'requestTarik']);
     Route::get('/pinjaman', [PinjamanController::class, 'index']);
     Route::post('/pinjaman', [PinjamanController::class, 'store']);
     Route::get('/profile', [ProfileController::class, 'show']);
+    Route::put('/profile', [ProfileController::class, 'update']);
+
+    // Kebijakan (read-only untuk semua role, mis. cek limit plafon di form Ajukan Pinjaman)
+    Route::get('/kebijakan', [KebijakanController::class, 'show']);
 
     // ---- BENDAHARA (KETUA juga boleh akses) ----
     Route::middleware('role:BENDAHARA,KETUA')->prefix('admin')->group(function () {
@@ -34,11 +40,19 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/anggota', [AnggotaController::class, 'index']);
         Route::get('/anggota/{anggota}', [AnggotaController::class, 'show']);
         Route::post('/anggota/{anggota}/simpanan', [AnggotaController::class, 'storeSimpanan']);
+        Route::post('/anggota/{anggota}/simpanan/tarik', [AnggotaController::class, 'tarikSimpanan']);
         Route::patch('/anggota/{anggota}/status', [AnggotaController::class, 'updateStatus']);
+
+        Route::get('/simpanan/pending', [SimpananController::class, 'pendingRequests']);
+        Route::post('/simpanan/{simpanan}/konfirmasi', [SimpananController::class, 'konfirmasiTarik']);
 
         Route::get('/pinjaman', [PinjamanController::class, 'indexAll']);
         Route::get('/pinjaman/{pinjaman}', [PinjamanController::class, 'show']);
         Route::post('/pinjaman/{pinjaman}/verifikasi', [PinjamanController::class, 'verifikasi']);
+        Route::post('/cicilan/{cicilan}/bayar', [PinjamanController::class, 'bayarCicilan']);
+
+        Route::get('/kas', [KasController::class, 'index']);
+        Route::post('/kas/tarik', [KasController::class, 'tarik']);
     });
 
     // ---- KETUA only ----
@@ -49,7 +63,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/pinjaman/bypass-queue', [PinjamanController::class, 'bypassQueue']);
         Route::post('/pinjaman/{pinjaman}/bypass', [PinjamanController::class, 'bypass']);
 
-        // Kendali Kebijakan
+        // Kendali Kebijakan (manajemen - baca + ubah)
         Route::get('/kebijakan', [KebijakanController::class, 'show']);
         Route::put('/kebijakan', [KebijakanController::class, 'update']);
 

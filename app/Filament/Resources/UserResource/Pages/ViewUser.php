@@ -106,8 +106,8 @@ class ViewUser extends ViewRecord
 
     private static function totalSimpanan(int $userId, string $jenis): float
     {
-        $setor = Simpanan::where('user_id', $userId)->where('jenis', $jenis)->where('tipe', 'SETOR')->sum('jumlah');
-        $tarik = Simpanan::where('user_id', $userId)->where('jenis', $jenis)->where('tipe', 'TARIK')->sum('jumlah');
+        $setor = Simpanan::where('user_id', $userId)->where('jenis', $jenis)->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
+        $tarik = Simpanan::where('user_id', $userId)->where('jenis', $jenis)->where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah');
 
         return (float) ($setor - $tarik);
     }

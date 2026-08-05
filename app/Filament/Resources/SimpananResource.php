@@ -13,6 +13,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Form;
+use Filament\Forms\Get;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Columns\BadgeColumn;
@@ -52,6 +53,7 @@ class SimpananResource extends Resource
                                 ->searchable()
                                 ->preload()
                                 ->required()
+                                ->live()
                                 ->columnSpanFull(),
 
                             Select::make('jenis')
@@ -61,6 +63,7 @@ class SimpananResource extends Resource
                                     'WAJIB' => 'Simpanan Wajib',
                                     'SUKARELA' => 'Simpanan Sukarela',
                                 ])
+                                ->live()
                                 ->required(),
 
                             Select::make('tipe')
@@ -70,6 +73,7 @@ class SimpananResource extends Resource
                                     'TARIK' => 'Tarik',
                                 ])
                                 ->default('SETOR')
+                                ->live()
                                 ->required(),
 
                             TextInput::make('jumlah')
@@ -77,7 +81,25 @@ class SimpananResource extends Resource
                                 ->numeric()
                                 ->prefix('Rp')
                                 ->required()
-                                ->minValue(0),
+                                ->minValue(0)
+                                ->helperText(function (Get $get): ?string {
+                                    if ($get('tipe') !== 'TARIK' || ! $get('user_id') || ! $get('jenis')) {
+                                        return null;
+                                    }
+                                    $saldo = self::saldoTersedia((int) $get('user_id'), $get('jenis'));
+                                    return 'Saldo ' . $get('jenis') . ' tersedia saat ini: Rp ' . number_format($saldo, 0, ',', '.');
+                                })
+                                ->rules([
+                                    fn (Get $get): \Closure => function (string $attribute, $value, \Closure $fail) use ($get) {
+                                        if ($get('tipe') !== 'TARIK' || ! $get('user_id') || ! $get('jenis')) {
+                                            return;
+                                        }
+                                        $saldo = self::saldoTersedia((int) $get('user_id'), $get('jenis'));
+                                        if ((float) $value > $saldo) {
+                                            $fail('Jumlah melebihi saldo tersedia (Rp ' . number_format($saldo, 0, ',', '.') . ').');
+                                        }
+                                    },
+                                ]),
 
                             DatePicker::make('tanggal')
                                 ->label('Tanggal Transaksi')
@@ -214,5 +236,14 @@ class SimpananResource extends Resource
             'create' => Pages\CreateSimpanan::route('/create'),
             'edit' => Pages\EditSimpanan::route('/{record}/edit'),
         ];
+    }
+
+    private static function saldoTersedia(int $userId, string $jenis): float
+    {
+        $setor = Simpanan::where('user_id', $userId)->where('jenis', $jenis)->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
+        $tarik = Simpanan::where('user_id', $userId)->where('jenis', $jenis)->where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah');
+        $pending = Simpanan::where('user_id', $userId)->where('jenis', $jenis)->where('tipe', 'TARIK')->where('status', 'PENDING')->sum('jumlah');
+
+        return (float) ($setor - $tarik - $pending);
     }
 }

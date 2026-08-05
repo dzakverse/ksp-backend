@@ -30,11 +30,11 @@ class AnggotaController extends Controller
 
         // Mapping data agar menyajikan struktur `saldo` lengkap untuk React
         $items = collect($paginated->items())->map(function (User $user) {
-            $pokok = Simpanan::where('user_id', $user->id)->where('jenis', 'POKOK')->where('tipe', 'SETOR')->sum('jumlah');
-            $wajib = Simpanan::where('user_id', $user->id)->where('jenis', 'WAJIB')->where('tipe', 'SETOR')->sum('jumlah');
+            $pokok = Simpanan::where('user_id', $user->id)->where('jenis', 'POKOK')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
+            $wajib = Simpanan::where('user_id', $user->id)->where('jenis', 'WAJIB')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
 
-            $sukarelaSetor = Simpanan::where('user_id', $user->id)->where('jenis', 'SUKARELA')->where('tipe', 'SETOR')->sum('jumlah');
-            $sukarelaTarik = Simpanan::where('user_id', $user->id)->where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->sum('jumlah');
+            $sukarelaSetor = Simpanan::where('user_id', $user->id)->where('jenis', 'SUKARELA')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
+            $sukarelaTarik = Simpanan::where('user_id', $user->id)->where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah');
             $sukarela = $sukarelaSetor - $sukarelaTarik;
 
             return [
@@ -66,10 +66,10 @@ class AnggotaController extends Controller
     // GET /api/admin/anggota/{anggota} -> pages/admin/DetailAnggota.jsx
     public function show(User $anggota)
     {
-        $pokok = $anggota->simpanans()->where('jenis', 'POKOK')->where('tipe', 'SETOR')->sum('jumlah');
-        $wajib = $anggota->simpanans()->where('jenis', 'WAJIB')->where('tipe', 'SETOR')->sum('jumlah');
-        $sukarelaSetor = $anggota->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'SETOR')->sum('jumlah');
-        $sukarelaTarik = $anggota->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->sum('jumlah');
+        $pokok = $anggota->simpanans()->where('jenis', 'POKOK')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
+        $wajib = $anggota->simpanans()->where('jenis', 'WAJIB')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
+        $sukarelaSetor = $anggota->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
+        $sukarelaTarik = $anggota->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah');
 
         // Pinjaman aktif (jika ada) - agar Bendahara/Ketua bisa lihat sekilas saat membuka detail anggota
         $pinjamanAktif = $anggota->pinjamans()->where('status', 'DISETUJUI')->latest()->first();
@@ -91,6 +91,20 @@ class AnggotaController extends Controller
                 'jumlah' => (float) $pinjamanAktif->jumlah,
                 'tenor_bulan' => $pinjamanAktif->tenor_bulan,
             ] : null,
+            'daftar_pinjaman' => $anggota->pinjamans()
+                ->with('cicilans')
+                ->orderByDesc('created_at')
+                ->get()
+                ->map(fn ($p) => [
+                    'id' => $p->id,
+                    'kode' => $p->kode,
+                    'jumlah' => (float) $p->jumlah,
+                    'tenor_bulan' => $p->tenor_bulan,
+                    'status' => $p->status,
+                    'alasan' => $p->alasan,
+                    'created_at' => $p->created_at,
+                    'cicilan' => $p->cicilans->sortBy('cicilan_ke')->values(),
+                ]),
             'riwayat_simpanan' => $anggota->simpanans()->orderByDesc('tanggal')->take(20)->get(),
         ]);
     }
@@ -125,5 +139,41 @@ class AnggotaController extends Controller
         $anggota->update($validated);
 
         return response()->json(['status_keanggotaan' => $anggota->status_keanggotaan]);
+    }
+
+    // POST /api/admin/anggota/{anggota}/simpanan/tarik -> Bendahara/Ketua tarik simpanan langsung
+    // (semua jenis: POKOK, WAJIB, SUKARELA - dengan pengecekan saldo cukup)
+    public function tarikSimpanan(Request $request, User $anggota)
+    {
+        $validated = $request->validate([
+            'jenis' => 'required|in:POKOK,WAJIB,SUKARELA',
+            'jumlah' => 'required|numeric|min:1',
+            'keterangan' => 'nullable|string',
+        ]);
+
+        $totalSetor = $anggota->simpanans()->where('jenis', $validated['jenis'])->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
+        $totalTarik = $anggota->simpanans()->where('jenis', $validated['jenis'])->where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah');
+        $totalPending = $anggota->simpanans()->where('jenis', $validated['jenis'])->where('tipe', 'TARIK')->where('status', 'PENDING')->sum('jumlah');
+        $saldoTersedia = $totalSetor - $totalTarik - $totalPending;
+
+        if ($validated['jumlah'] > $saldoTersedia) {
+            return response()->json([
+                'message' => "Saldo Simpanan {$validated['jenis']} anggota ini tidak mencukupi.",
+                'saldo_tersedia' => $saldoTersedia,
+            ], 422);
+        }
+
+        $simpanan = $anggota->simpanans()->create([
+            'jenis' => $validated['jenis'],
+            'tipe' => 'TARIK',
+            'jumlah' => $validated['jumlah'],
+            'keterangan' => $validated['keterangan'] ?? 'Penarikan langsung oleh pengurus',
+            'status' => 'BERHASIL',
+            'tanggal' => now()->toDateString(),
+            'created_by' => $request->user()->id,
+            'diproses_oleh' => $request->user()->id,
+        ]);
+
+        return response()->json($simpanan, 201);
     }
 }

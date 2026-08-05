@@ -82,4 +82,32 @@ class Pinjaman extends Model
     {
         return $this->hasMany(Cicilan::class, 'pinjaman_id');
     }
+
+    /**
+     * Generate jadwal cicilan otomatis (dipanggil sekali saat status berubah
+     * menjadi DISETUJUI, baik lewat alur normal maupun Emergency Bypass).
+     * Idempotent: tidak akan generate ulang kalau sudah pernah ada cicilan.
+     */
+    public function generateCicilanSchedule(): void
+    {
+        if ($this->cicilans()->exists()) {
+            return;
+        }
+
+        $bungaPersen = $this->suku_bunga_persen ?? Kebijakan::current()->suku_bunga_persen;
+        $pokokBulanan = $this->jumlah / $this->tenor_bulan;
+        $bungaBulanan = $this->jumlah * ($bungaPersen / 100);
+        $angsuran = $this->angsuran_per_bulan ?? round($pokokBulanan + $bungaBulanan);
+
+        $tanggalDasar = now();
+
+        for ($i = 1; $i <= $this->tenor_bulan; $i++) {
+            $this->cicilans()->create([
+                'cicilan_ke' => $i,
+                'jumlah' => $angsuran,
+                'jatuh_tempo' => $tanggalDasar->copy()->addMonths($i)->toDateString(),
+                'status' => 'BELUM_BAYAR',
+            ]);
+        }
+    }
 }

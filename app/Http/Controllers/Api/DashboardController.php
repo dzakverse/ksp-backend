@@ -24,10 +24,10 @@ class DashboardController extends Controller
             }
 
             // Hitung Sub Saldo Simpanan
-            $totalPokok = $user->simpanans()->where('jenis', 'POKOK')->where('tipe', 'SETOR')->sum('jumlah') ?? 0;
-            $totalWajib = $user->simpanans()->where('jenis', 'WAJIB')->where('tipe', 'SETOR')->sum('jumlah') ?? 0;
-            $sukarelaSetor = $user->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'SETOR')->sum('jumlah') ?? 0;
-            $sukarelaTarik = $user->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->sum('jumlah') ?? 0;
+            $totalPokok = $user->simpanans()->where('jenis', 'POKOK')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah') ?? 0;
+            $totalWajib = $user->simpanans()->where('jenis', 'WAJIB')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah') ?? 0;
+            $sukarelaSetor = $user->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah') ?? 0;
+            $sukarelaTarik = $user->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah') ?? 0;
             $totalSukarela = $sukarelaSetor - $sukarelaTarik;
 
             // Gabungkan aktivitas simpanan
@@ -103,11 +103,11 @@ public function adminIndex(Request $request)
     {
         try {
             // 1. Total Simpanan Anggota berdasarkan jenis
-            $totalPokok = Simpanan::where('jenis', 'POKOK')->where('tipe', 'SETOR')->sum('jumlah') ?? 0;
-            $totalWajib = Simpanan::where('jenis', 'WAJIB')->where('tipe', 'SETOR')->sum('jumlah') ?? 0;
+            $totalPokok = Simpanan::where('jenis', 'POKOK')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah') ?? 0;
+            $totalWajib = Simpanan::where('jenis', 'WAJIB')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah') ?? 0;
             
-            $sukarelaSetor = Simpanan::where('jenis', 'SUKARELA')->where('tipe', 'SETOR')->sum('jumlah') ?? 0;
-            $sukarelaTarik = Simpanan::where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->sum('jumlah') ?? 0;
+            $sukarelaSetor = Simpanan::where('jenis', 'SUKARELA')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah') ?? 0;
+            $sukarelaTarik = Simpanan::where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah') ?? 0;
             $totalSukarela = $sukarelaSetor - $sukarelaTarik;
 
             $totalSimpananAnggota = $totalPokok + $totalWajib + $totalSukarela;
@@ -117,7 +117,9 @@ public function adminIndex(Request $request)
                 ->sum('jumlah') ?? 0;
 
             // 3. Total Kas Koperasi (Simpanan Anggota - Pinjaman Aktif)
-            $totalKas = $totalSimpananAnggota - $totalPinjamanAktif;
+            $totalKasKeluar = \App\Models\KasTransaksi::where('tipe', 'KELUAR')->sum('jumlah');
+            $totalKasMasuk = \App\Models\KasTransaksi::where('tipe', 'MASUK')->sum('jumlah');
+            $totalKas = $totalSimpananAnggota - $totalPinjamanAktif + $totalKasMasuk - $totalKasKeluar;
 
             // 4. Ambil 5 Transaksi Simpanan Terbaru
             $simpananTerbaru = Simpanan::with('user')
@@ -130,7 +132,7 @@ public function adminIndex(Request $request)
                         'anggota' => $s->user->nama ?? 'Anggota',
                         'nip' => $s->user->nip ?? 'N/A',
                         'kategori' => $s->tipe === 'SETOR' ? 'SETORAN' : 'PENARIKAN',
-                        'waktu' => $s->created_at ? $s->created_at->diffForHumans() : '-',
+                        'waktu' => $s->created_at,
                         'jumlah' => (float) $s->jumlah,
                         'status' => 'Berhasil',
                         'tipe' => $s->tipe === 'SETOR' ? 'in' : 'out',
@@ -152,7 +154,7 @@ public function adminIndex(Request $request)
                         'anggota' => $p->user->nama ?? 'Anggota',
                         'nip' => $p->user->nip ?? 'N/A',
                         'kategori' => 'PINJAMAN',
-                        'waktu' => $p->created_at ? $p->created_at->diffForHumans() : '-',
+                        'waktu' => $p->created_at,
                         'jumlah' => (float) $p->jumlah,
                         'status' => $statusFormatted,
                         'tipe' => $tipe,

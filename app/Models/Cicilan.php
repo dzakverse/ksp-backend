@@ -13,13 +13,14 @@ class Cicilan extends Model
     protected $table = 'cicilans';
 
     protected $fillable = [
-        'pinjaman_id', 
-        'cicilan_ke', 
-        'jumlah', 
-        'jatuh_tempo', 
-        'tanggal_bayar', 
+        'pinjaman_id',
+        'cicilan_ke',
+        'jumlah',
+        'jatuh_tempo',
+        'tanggal_bayar',
         'status',
-        'keterangan', // Ditambahkan dari versi uji coba (opsional)
+        'catatan',
+        'dibayar_oleh',
     ];
 
     /**
@@ -40,5 +41,10 @@ class Cicilan extends Model
     public function pinjaman(): BelongsTo
     {
         return $this->belongsTo(Pinjaman::class, 'pinjaman_id');
+    }
+
+    public function dibayarOleh(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'dibayar_oleh');
     }
 }

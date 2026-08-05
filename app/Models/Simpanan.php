@@ -21,6 +21,7 @@ class Simpanan extends Model
         'status', 
         'tanggal',
         'created_by',
+        'diproses_oleh',
     ];
 
     /**
@@ -48,5 +49,14 @@ class Simpanan extends Model
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
+     * Relasi ke user (Bendahara/Ketua/Super Admin) yang mengeksekusi/konfirmasi
+     * transaksi berstatus PENDING (mis. request tarik simpanan dari Anggota).
+     */
+    public function diprosesOleh(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'diproses_oleh');
     }
 }

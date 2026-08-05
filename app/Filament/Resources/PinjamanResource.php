@@ -234,6 +234,8 @@ class PinjamanResource extends Resource
                             'catatan_verifikasi' => 'Disetujui via Bypass Super Admin',
                         ]);
 
+                        $record->generateCicilanSchedule();
+
                         Notification::make()
                             ->title('Pinjaman berhasil disetujui')
                             ->body("Pinjaman untuk {$record->user->nama} telah disetujui langsung (bypass).")

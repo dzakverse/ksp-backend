@@ -29,4 +29,22 @@ class ProfileController extends Controller
             'tanggal_bergabung' => $user->tanggal_bergabung,
         ]);
     }
+
+    // PUT /api/profile -> pages/edit.jsx (Anggota mengedit data kontak miliknya sendiri)
+    // Hanya field kontak yang boleh diubah mandiri; data identitas resmi (nama, NIK,
+    // NIP, tanggal lahir, dst) tetap harus lewat Bendahara/Ketua/Super Admin.
+    public function update(Request $request)
+    {
+        $validated = $request->validate([
+            'email' => 'nullable|email|max:255',
+            'whatsapp' => 'nullable|string|max:30',
+            'alamat' => 'nullable|string',
+            'foto_url' => 'nullable|string|max:500',
+        ]);
+
+        $user = $request->user();
+        $user->update($validated);
+
+        return response()->json($user->fresh());
+    }
 }

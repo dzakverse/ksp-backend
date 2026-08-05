@@ -27,6 +27,8 @@ class PinjamanController extends Controller
                 'tenor_bulan' => $aktif->tenor_bulan,
                 'angsuran_per_bulan' => round($angsuranPerBulan),
                 'sisa_pinjaman' => $aktif->jumlah - $totalDibayar,
+                'cicilan_lunas' => $aktif->cicilans->where('status', 'LUNAS')->count(),
+                'cicilan' => $aktif->cicilans->sortBy('cicilan_ke')->values(),
             ];
         }
 
@@ -40,10 +42,14 @@ class PinjamanController extends Controller
     // POST /api/pinjaman -> pengajuan baru (pages/ajukan.jsx)
     public function store(Request $request)
     {
+        $plafon = \App\Models\Kebijakan::current()->plafon_maksimal;
+
         $validated = $request->validate([
-            'jumlah' => 'required|numeric|min:100000',
+            'jumlah' => ['required', 'numeric', 'min:100000', "max:{$plafon}"],
             'tenor_bulan' => 'required|integer|min:1|max:36',
             'alasan' => 'nullable|string',
+        ], [
+            'jumlah.max' => 'Nominal pengajuan melebihi plafon maksimal yang berlaku (Rp ' . number_format($plafon, 0, ',', '.') . ').',
         ]);
 
         $pinjaman = $request->user()->pinjamans()->create([
@@ -152,6 +158,10 @@ class PinjamanController extends Controller
             'diverifikasi_oleh' => $request->user()->id,
         ]);
 
+        if ($validated['status'] === 'DISETUJUI') {
+            $pinjaman->generateCicilanSchedule();
+        }
+
         return response()->json($pinjaman);
     }
 
@@ -183,6 +193,29 @@ class PinjamanController extends Controller
             'catatan_verifikasi' => $validated['catatan_verifikasi'] ?? 'Disetujui via Emergency Bypass Ketua',
         ]);
 
+        $pinjaman->generateCicilanSchedule();
+
         return response()->json($pinjaman);
+    }
+
+    // POST /api/admin/cicilan/{cicilan}/bayar -> Bendahara konfirmasi pembayaran 1 angsuran
+    public function bayarCicilan(Request $request, \App\Models\Cicilan $cicilan)
+    {
+        $validated = $request->validate([
+            'catatan' => 'required|string|max:500',
+        ]);
+
+        if ($cicilan->status === 'LUNAS') {
+            return response()->json(['message' => 'Cicilan ini sudah tercatat lunas.'], 422);
+        }
+
+        $cicilan->update([
+            'status' => 'LUNAS',
+            'tanggal_bayar' => now()->toDateString(),
+            'catatan' => $validated['catatan'],
+            'dibayar_oleh' => $request->user()->id,
+        ]);
+
+        return response()->json($cicilan->fresh());
     }
 }
