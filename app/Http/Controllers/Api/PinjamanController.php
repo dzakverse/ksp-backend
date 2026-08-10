@@ -166,15 +166,15 @@ class PinjamanController extends Controller
     }
 
     // GET /api/ketua/pinjaman/bypass-queue -> pages/ketua/EmergencyBypass.jsx
-    // Ambil 1 pengajuan MENUNGGU tertua (dianggap paling mendesak/lama diproses)
+    // Ambil SELURUH pengajuan berstatus MENUNGGU, diurutkan dari yang paling lama
+    // mengajukan (paling mendesak) ke yang paling baru.
     public function bypassQueue()
     {
-        $tertua = Pinjaman::with('user')->where('status', 'MENUNGGU')->oldest()->first();
-        $totalMenunggu = Pinjaman::where('status', 'MENUNGGU')->count();
+        $antrean = Pinjaman::with('user')->where('status', 'MENUNGGU')->oldest()->get();
 
         return response()->json([
-            'urgent' => $tertua,
-            'total_menunggu' => $totalMenunggu,
+            'antrean' => $antrean,
+            'total_menunggu' => $antrean->count(),
         ]);
     }
 
