@@ -27,6 +27,7 @@ class User extends Authenticatable implements FilamentUser, HasName // <-- TAMBA
         'tanggal_lahir', 
         'jenis_kelamin', 
         'alamat',
+        'unit_kerja',
         'whatsapp', 
         'email', 
         'foto_url', 

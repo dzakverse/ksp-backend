@@ -77,6 +77,10 @@ class UserResource extends Resource
                                 ->maxDate(now())
                                 ->displayFormat('d/m/Y'),
 
+                            TextInput::make('unit_kerja')
+                                ->label('Unit Kerja')
+                                ->maxLength(255),
+
                             Select::make('role')
                                 ->label('Role Akses')
                                 ->options([

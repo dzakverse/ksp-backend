@@ -29,6 +29,7 @@ class ViewUser extends ViewRecord
                             ->label('Tanggal Lahir')
                             ->date('d M Y')
                             ->placeholder('-'),
+                        TextEntry::make('unit_kerja')->label('Unit Kerja')->placeholder('-'),
                         TextEntry::make('role')
                             ->badge()
                             ->formatStateUsing(fn (string $state): string => match ($state) {
@@ -44,7 +45,6 @@ class ViewUser extends ViewRecord
                             ->color(fn (?string $state): string => $state === 'AKTIF' ? 'success' : 'danger'),
                         TextEntry::make('email')->placeholder('-'),
                         TextEntry::make('whatsapp')->placeholder('-'),
-                        TextEntry::make('unit_kerja')->placeholder('-'),
                         TextEntry::make('tanggal_bergabung')
                             ->label('Bergabung Sejak')
                             ->date('d M Y')
