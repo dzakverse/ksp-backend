@@ -22,6 +22,13 @@ class ViewUser extends ViewRecord
                     ->schema([
                         TextEntry::make('nama'),
                         TextEntry::make('nip')->label('NIP'),
+                        TextEntry::make('nik')->label('NIK')->placeholder('-'),
+                        TextEntry::make('jenis_kelamin')->label('Jenis Kelamin')->placeholder('-'),
+                        TextEntry::make('tempat_lahir')->label('Tempat Lahir')->placeholder('-'),
+                        TextEntry::make('tanggal_lahir')
+                            ->label('Tanggal Lahir')
+                            ->date('d M Y')
+                            ->placeholder('-'),
                         TextEntry::make('role')
                             ->badge()
                             ->formatStateUsing(fn (string $state): string => match ($state) {

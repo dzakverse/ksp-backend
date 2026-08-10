@@ -54,6 +54,29 @@ class UserResource extends Resource
                                 ->maxLength(20)
                                 ->validationMessages(['unique' => 'NIP sudah terdaftar']),
 
+                            TextInput::make('nik')
+                                ->label('NIK')
+                                ->maxLength(16)
+                                ->numeric()
+                                ->unique(ignoreRecord: true)
+                                ->validationMessages(['unique' => 'NIK sudah terdaftar']),
+
+                            Select::make('jenis_kelamin')
+                                ->label('Jenis Kelamin')
+                                ->options([
+                                    'Laki-Laki' => 'Laki-Laki',
+                                    'Perempuan' => 'Perempuan',
+                                ]),
+
+                            TextInput::make('tempat_lahir')
+                                ->label('Tempat Lahir')
+                                ->maxLength(255),
+
+                            DatePicker::make('tanggal_lahir')
+                                ->label('Tanggal Lahir')
+                                ->maxDate(now())
+                                ->displayFormat('d/m/Y'),
+
                             Select::make('role')
                                 ->label('Role Akses')
                                 ->options([
