@@ -40,6 +40,9 @@ class DashboardController extends Controller
                         . ($s->keterangan ? ' - ' . $s->keterangan : ''),
                     'kategori' => $s->jenis,
                     'jumlah' => (float) $s->jumlah,
+                    // 'arah' = arah uang saja (dipakai utk warna & tanda +/- nominal),
+                    // konsisten dengan halaman Simpanan Saya. Warna badge status
+                    // ditentukan terpisah di frontend dari teks 'status', bukan dari sini.
                     'arah' => $s->tipe === 'SETOR' ? 'in' : 'out',
                     'status' => $s->status ?? 'BERHASIL',
                 ];
@@ -54,7 +57,10 @@ class DashboardController extends Controller
                     'deskripsi' => 'Pengajuan Pinjaman #' . ($p->kode ?? $p->id),
                     'kategori' => 'PINJAMAN',
                     'jumlah' => (float) $p->jumlah,
-                    'arah' => 'pending',
+                    // Nominal pinjaman ditampilkan netral (tanpa warna/tanda +/-),
+                    // konsisten dengan tabel Riwayat Pinjaman di halaman Pinjaman.
+                    // Warna badge status ditentukan terpisah di frontend dari teks 'status'.
+                    'arah' => 'netral',
                     'status' => match ($p->status) {
                         'MENUNGGU' => 'Menunggu Verifikasi',
                         'DISETUJUI_BENDAHARA' => 'Menunggu Persetujuan Ketua',
