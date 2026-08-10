@@ -22,6 +22,7 @@ class ProfileController extends Controller
             'tempat_lahir' => $user->tempat_lahir,
             'tanggal_lahir' => $user->tanggal_lahir,
             'jenis_kelamin' => $user->jenis_kelamin,
+            'unit_kerja' => $user->unit_kerja,
             'alamat' => $user->alamat,
             'whatsapp' => $user->whatsapp,
             'email' => $user->email,

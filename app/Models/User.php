@@ -27,6 +27,7 @@ class User extends Authenticatable implements FilamentUser, HasName // <-- TAMBA
         'tanggal_lahir', 
         'jenis_kelamin', 
         'alamat',
+        'unit_kerja',
         'whatsapp', 
         'email', 
         'foto_url', 
@@ -49,6 +50,42 @@ class User extends Authenticatable implements FilamentUser, HasName // <-- TAMBA
             'tanggal_bergabung' => 'date',
             'tanggal_lahir' => 'date',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::creating(function (User $user) {
+            // 1. Tentukan Prefix berdasarkan Role
+            $prefix = match ($user->role) {
+                'BENDAHARA' => 'BDR',
+                'KETUA' => 'KET',
+                'SUPER_ADMIN' => 'ADM',
+                default => 'ANG', // Default untuk ANGGOTA
+            };
+
+            // 2. Ambil Tahun Sekarang (Misal: 2026)
+            $tahun = now()->format('Y');
+
+            // 3. Format Prefix gabungan (contoh: "ANG-2026-")
+            $prefixFull = "{$prefix}-{$tahun}-";
+
+            // 4. Cari nomor urut terakhir pada tahun & prefix yang sama
+            $lastUser = User::where('id_anggota', 'LIKE', "{$prefixFull}%")
+                ->orderBy('id_anggota', 'desc')
+                ->first();
+
+            if ($lastUser && $lastUser->id_anggota) {
+                // Ambil 3 digit angka terakhir (misal: "005" -> 5)
+                $lastNumber = (int) substr($lastUser->id_anggota, -3);
+                $nextNumber = $lastNumber + 1;
+            } else {
+                // Jika belum ada user di tahun ini, mulai dari 1
+                $nextNumber = 1;
+            }
+
+            // 5. Format menjadi 3 digit angka dengan pad nol (misal: 1 -> 001)
+            $user->id_anggota = $prefixFull . str_pad($nextNumber, 3, '0', STR_PAD_LEFT);
+        });
     }
 
     /**
