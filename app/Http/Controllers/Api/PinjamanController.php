@@ -198,6 +198,76 @@ class PinjamanController extends Controller
         return response()->json($pinjaman);
     }
 
+    // POST /api/ketua/pinjaman/{pinjaman}/restrukturisasi -> Ketua menggabungkan sisa
+    // pinjaman lama yang masih aktif dengan pengajuan pinjaman baru (top-up).
+    // Contoh: Pinjaman Lama (sisa 7jt) + Pinjaman Baru (3jt) = Total Hutang Baru 10jt.
+    // Pinjaman lama otomatis ditutup (LUNAS) dan seluruh cicilan sisa dianggap
+    // terbayar lewat penggabungan; pinjaman baru langsung DISETUJUI dengan jadwal
+    // cicilan baru dari total gabungan.
+    public function restrukturisasi(Request $request, Pinjaman $pinjaman)
+    {
+        $validated = $request->validate([
+            'jumlah_tambahan' => 'required|numeric|min:1',
+            'tenor_bulan' => 'required|integer|min:1|max:36',
+            'catatan' => 'nullable|string',
+        ]);
+
+        if ($pinjaman->status !== 'DISETUJUI') {
+            return response()->json(['message' => 'Hanya pinjaman yang sedang aktif (DISETUJUI) yang bisa direstrukturisasi.'], 422);
+        }
+
+        if ($pinjaman->pinjamanBaru()->exists()) {
+            return response()->json(['message' => 'Pinjaman ini sudah pernah direstrukturisasi sebelumnya.'], 422);
+        }
+
+        $pinjaman->load('cicilans');
+        $sisaCicilan = $pinjaman->cicilans->where('status', 'BELUM_BAYAR')->count();
+        $pokokBulanan = $pinjaman->tenor_bulan > 0 ? $pinjaman->jumlah / $pinjaman->tenor_bulan : 0;
+        $sisaPokokLama = round($pokokBulanan * $sisaCicilan, 2);
+
+        if ($sisaPokokLama <= 0) {
+            return response()->json(['message' => 'Pinjaman ini sudah lunas — anggota bisa langsung mengajukan pinjaman baru biasa tanpa restrukturisasi.'], 422);
+        }
+
+        $jumlahTambahan = (float) $validated['jumlah_tambahan'];
+        $jumlahBaru = $sisaPokokLama + $jumlahTambahan;
+
+        $ringkasan = 'Pinjaman Lama (sisa Rp ' . number_format($sisaPokokLama, 0, ',', '.')
+            . ') + Pinjaman Baru (Rp ' . number_format($jumlahTambahan, 0, ',', '.')
+            . ') = Total Hutang Baru Rp ' . number_format($jumlahBaru, 0, ',', '.');
+
+        $baru = \Illuminate\Support\Facades\DB::transaction(function () use ($request, $pinjaman, $validated, $sisaPokokLama, $jumlahBaru, $ringkasan) {
+            // Tutup pinjaman lama: seluruh cicilan sisa dianggap lunas lewat penggabungan
+            $pinjaman->cicilans()->where('status', 'BELUM_BAYAR')->update([
+                'status' => 'LUNAS',
+                'tanggal_bayar' => now()->toDateString(),
+                'catatan' => 'Dilunasi otomatis - digabung ke pinjaman baru hasil restrukturisasi/top-up',
+                'dibayar_oleh' => $request->user()->id,
+            ]);
+            $pinjaman->update(['status' => 'LUNAS']);
+
+            return Pinjaman::create([
+                'kode' => 'LN-' . now()->format('Y') . '-' . str_pad(Pinjaman::count() + 1, 3, '0', STR_PAD_LEFT),
+                'user_id' => $pinjaman->user_id,
+                'pinjaman_lama_id' => $pinjaman->id,
+                'jumlah' => $jumlahBaru,
+                'tenor_bulan' => $validated['tenor_bulan'],
+                'suku_bunga_persen' => $pinjaman->suku_bunga_persen,
+                'status' => 'DISETUJUI',
+                'is_restrukturisasi' => true,
+                'sisa_pokok_lama' => $sisaPokokLama,
+                'alasan' => 'Restrukturisasi/Top-up dari pinjaman #' . $pinjaman->kode,
+                'catatan_verifikasi' => $validated['catatan'] ? $validated['catatan'] . ' | ' . $ringkasan : $ringkasan,
+                'diverifikasi_oleh' => $request->user()->id,
+                'created_by' => $request->user()->id,
+            ]);
+            // generateCicilanSchedule() otomatis terpanggil lewat model event Pinjaman::booted()
+            // karena status baru ini langsung DISETUJUI.
+        });
+
+        return response()->json($baru->fresh('cicilans'), 201);
+    }
+
     // POST /api/admin/cicilan/{cicilan}/bayar -> Bendahara konfirmasi pembayaran 1 angsuran
     public function bayarCicilan(Request $request, \App\Models\Cicilan $cicilan)
     {

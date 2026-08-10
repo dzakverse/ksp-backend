@@ -28,7 +28,28 @@ class Pinjaman extends Model
         'is_bypassed',
         'bypassed_by',
         'created_by',
+        'pinjaman_lama_id',
+        'is_restrukturisasi',
+        'sisa_pokok_lama',
     ];
+
+    /**
+     * Auto-generate jadwal cicilan begitu status pinjaman menjadi DISETUJUI,
+     * dari jalur MANAPUN (alur normal verifikasi/persetujuan, Emergency Bypass,
+     * ATAU input langsung oleh Super Admin lewat panel Filament). Tanpa hook ini,
+     * pinjaman yang dibuat langsung berstatus DISETUJUI oleh Super Admin tidak
+     * akan pernah punya cicilan, sehingga tracking-nya tidak muncul di halaman
+     * manapun (Anggota, Bendahara, Ketua). generateCicilanSchedule() sendiri
+     * idempotent (skip kalau cicilan sudah ada), jadi aman dipanggil berkali-kali.
+     */
+    protected static function booted(): void
+    {
+        static::saved(function (Pinjaman $pinjaman) {
+            if ($pinjaman->status === 'DISETUJUI') {
+                $pinjaman->generateCicilanSchedule();
+            }
+        });
+    }
 
     /**
      * Casting tipe data desimal agar angka rupiah & persen presisi di Filament
@@ -40,7 +61,25 @@ class Pinjaman extends Model
             'suku_bunga_persen' => 'decimal:2',
             'angsuran_per_bulan' => 'decimal:2',
             'is_bypassed' => 'boolean',
+            'is_restrukturisasi' => 'boolean',
+            'sisa_pokok_lama' => 'decimal:2',
         ];
+    }
+
+    /**
+     * Relasi ke pinjaman lama yang digabung/direstrukturisasi ke pinjaman ini.
+     */
+    public function pinjamanLama(): BelongsTo
+    {
+        return $this->belongsTo(Pinjaman::class, 'pinjaman_lama_id');
+    }
+
+    /**
+     * Relasi ke pinjaman baru hasil restrukturisasi dari pinjaman ini (jika ada).
+     */
+    public function pinjamanBaru(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(Pinjaman::class, 'pinjaman_lama_id');
     }
 
     /**

@@ -121,6 +121,9 @@ public function adminIndex(Request $request)
             $totalKasMasuk = \App\Models\KasTransaksi::where('tipe', 'MASUK')->sum('jumlah');
             $totalKas = $totalSimpananAnggota - $totalPinjamanAktif + $totalKasMasuk - $totalKasKeluar;
 
+            // 3.5 Jumlah Anggota Aktif (dipakai di card ringkasan Beranda Bendahara & Ketua)
+            $jumlahAnggotaAktif = User::where('role', 'ANGGOTA')->where('status_keanggotaan', 'AKTIF')->count();
+
             // 4. Ambil 5 Transaksi Simpanan Terbaru
             $simpananTerbaru = Simpanan::with('user')
                 ->latest()
@@ -173,6 +176,7 @@ public function adminIndex(Request $request)
                 'total_kas' => (float) $totalKas,
                 'total_simpanan_anggota' => (float) $totalSimpananAnggota,
                 'total_pinjaman_aktif' => (float) $totalPinjamanAktif,
+                'jumlah_anggota_aktif' => $jumlahAnggotaAktif,
                 'sub_saldo' => [
                     'pokok' => (float) $totalPokok,
                     'wajib' => (float) $totalWajib,

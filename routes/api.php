@@ -58,6 +58,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ---- KETUA only ----
     Route::middleware('role:KETUA')->prefix('ketua')->group(function () {
         Route::post('/pinjaman/{pinjaman}/persetujuan', [PinjamanController::class, 'persetujuanKetua']);
+        Route::post('/pinjaman/{pinjaman}/restrukturisasi', [PinjamanController::class, 'restrukturisasi']);
 
         // Emergency Bypass
         Route::get('/pinjaman/bypass-queue', [PinjamanController::class, 'bypassQueue']);

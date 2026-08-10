@@ -78,6 +78,16 @@ class UserResource extends Resource
                             DatePicker::make('tanggal_bergabung')
                                 ->label('Tanggal Bergabung')
                                 ->default(now()),
+
+                            Select::make('status_keanggotaan')
+                                ->label('Status Keanggotaan')
+                                ->options([
+                                    'AKTIF' => 'Aktif',
+                                    'NONAKTIF' => 'Nonaktif',
+                                ])
+                                ->default('AKTIF')
+                                ->required()
+                                ->helperText('Akun berstatus Nonaktif tidak dapat login ke sistem.'),
                         ]),
 
                         Textarea::make('alamat')
@@ -137,6 +147,17 @@ class UserResource extends Resource
                     ->label('WhatsApp')
                     ->placeholder('-'),
 
+                BadgeColumn::make('status_keanggotaan')
+                    ->label('Status')
+                    ->colors([
+                        'success' => 'AKTIF',
+                        'danger' => 'NONAKTIF',
+                    ])
+                    ->formatStateUsing(fn (?string $state): string => match ($state) {
+                        'NONAKTIF' => 'Nonaktif',
+                        default => 'Aktif',
+                    }),
+
                 TextColumn::make('created_at')
                     ->label('Dibuat')
                     ->dateTime('d M Y')
@@ -186,6 +207,28 @@ class UserResource extends Resource
                         Notification::make()
                             ->title('Password berhasil diubah')
                             ->body("Password untuk {$record->nama} telah diperbarui.")
+                            ->success()
+                            ->send();
+                    })
+                    ->visible(fn (User $record): bool => $record->id !== auth()->id()),
+
+                // FITUR AKTIF/NONAKTIFKAN AKUN (mis. Super Admin menonaktifkan/mengaktifkan Bendahara)
+                Tables\Actions\Action::make('toggleStatus')
+                    ->label(fn (User $record): string => $record->status_keanggotaan === 'NONAKTIF' ? 'Aktifkan' : 'Nonaktifkan')
+                    ->icon(fn (User $record): string => $record->status_keanggotaan === 'NONAKTIF' ? 'heroicon-o-check-circle' : 'heroicon-o-no-symbol')
+                    ->color(fn (User $record): string => $record->status_keanggotaan === 'NONAKTIF' ? 'success' : 'danger')
+                    ->requiresConfirmation()
+                    ->modalHeading(fn (User $record): string => $record->status_keanggotaan === 'NONAKTIF'
+                        ? "Aktifkan akun {$record->nama}?"
+                        : "Nonaktifkan akun {$record->nama}?")
+                    ->modalDescription('Akun yang dinonaktifkan tidak akan bisa login ke sistem hingga diaktifkan kembali.')
+                    ->action(function (User $record): void {
+                        $statusBaru = $record->status_keanggotaan === 'NONAKTIF' ? 'AKTIF' : 'NONAKTIF';
+                        $record->update(['status_keanggotaan' => $statusBaru]);
+
+                        Notification::make()
+                            ->title($statusBaru === 'AKTIF' ? 'Akun berhasil diaktifkan' : 'Akun berhasil dinonaktifkan')
+                            ->body("{$record->nama} sekarang berstatus " . ($statusBaru === 'AKTIF' ? 'Aktif' : 'Nonaktif') . '.')
                             ->success()
                             ->send();
                     })
