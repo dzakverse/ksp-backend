@@ -9,6 +9,31 @@ use Illuminate\Support\Facades\DB;
 
 class PinjamanController extends Controller
 {
+    // Dipakai bareng oleh persetujuanKetua() dan bypass() supaya pinjaman lama
+    // SELALU otomatis dilunasi begitu pengajuan Top-Up-nya disetujui, lewat
+    // jalur mana pun (antrean normal ATAU emergency bypass). Sebelumnya logic
+    // ini cuma ada di persetujuanKetua(), jadi kalau pengajuan Top-Up di-ACC
+    // lewat Emergency Bypass, pinjaman lama nyangkut selamanya di status
+    // DISETUJUI (Aktif/Berjalan) walau anggota sudah menganggapnya "digabung".
+    private function tutupPinjamanLamaJikaTopup(Pinjaman $pinjamanBaru, int $userId): void
+    {
+        if (!$pinjamanBaru->is_topup || !$pinjamanBaru->topup_dari_pinjaman_id) {
+            return;
+        }
+
+        $pinjamanLama = Pinjaman::find($pinjamanBaru->topup_dari_pinjaman_id);
+
+        if ($pinjamanLama && $pinjamanLama->status !== 'LUNAS') {
+            $pinjamanLama->cicilans()->where('status', '!=', 'LUNAS')->update([
+                'status' => 'LUNAS',
+                'tanggal_bayar' => now()->toDateString(),
+                'catatan' => 'Dilunasi otomatis - digabung ke pinjaman Top-Up baru #' . $pinjamanBaru->kode,
+                'dibayar_oleh' => $userId,
+            ]);
+            $pinjamanLama->update(['status' => 'LUNAS']);
+        }
+    }
+
     // GET /api/pinjaman -> punya user yang login sendiri (pages/pinjaman.jsx)
     public function index(Request $request)
     {
@@ -42,8 +67,14 @@ class PinjamanController extends Controller
             ];
         }
 
+        $pengajuanPending = $riwayat->first(fn ($p) => in_array($p->status, ['MENUNGGU', 'DISETUJUI_BENDAHARA']));
+
         return response()->json([
             'pinjaman_aktif' => $pinjamanAktif,
+            'pengajuan_pending' => $pengajuanPending ? [
+                'kode' => $pengajuanPending->kode,
+                'status' => $pengajuanPending->status,
+            ] : null,
             'total_pengajuan' => $riwayat->count(),
             'riwayat' => $riwayat,
         ]);
@@ -66,6 +97,36 @@ class PinjamanController extends Controller
 
         try {
             DB::beginTransaction();
+
+            // Lock baris user ini selama transaksi berjalan. Tujuannya BUKAN buat
+            // proteksi data user, tapi supaya kalau ada 2 request submit yang
+            // nyaris bersamaan (double-klik, atau dipanggil manual berkali-kali
+            // ke API), request kedua WAJIB nunggu request pertama commit/rollback
+            // dulu sebelum lanjut cek "masih ada pengajuan pending?" di bawah.
+            // Tanpa lock ini, dua transaksi bisa sama-sama lolos pengecekan
+            // "belum ada yang pending" secara bersamaan (race condition) sebelum
+            // salah satunya sempat commit ke DB.
+            \App\Models\User::where('id', $request->user()->id)->lockForUpdate()->first();
+
+            // ---- Guard anti-spam: anggota tidak boleh punya lebih dari satu
+            // pengajuan yang masih berjalan di antrean (MENUNGGU / sudah
+            // diverifikasi Bendahara tapi belum di-ACC Ketua). Tanpa ini,
+            // anggota bisa submit berkali-kali sebelum ada yang diproses, lalu
+            // kalau semuanya di-ACC satu-satu oleh Bendahara+Ketua, tiap
+            // pengajuan dianggap independen (bukan Top-Up, karena saat masing-
+            // masing disubmit belum ada pinjaman berstatus DISETUJUI) -> hasil
+            // akhirnya anggota bisa punya banyak pinjaman DISETUJUI aktif
+            // sekaligus, padahal seharusnya cuma boleh satu.
+            $pengajuanPending = $request->user()->pinjamans()
+                ->whereIn('status', ['MENUNGGU', 'DISETUJUI_BENDAHARA'])
+                ->first();
+
+            if ($pengajuanPending) {
+                DB::rollBack();
+                return response()->json([
+                    'message' => 'Anda masih punya pengajuan pinjaman #' . $pengajuanPending->kode . ' yang sedang diproses. Tunggu sampai diverifikasi/disetujui/ditolak sebelum mengajukan pinjaman baru.',
+                ], 422);
+            }
 
             // Mencegah crash jika input bernama 'keterangan' alih-alih 'alasan'
             $alasan = $request->input('alasan') ?? $request->input('keterangan') ?? '-';
@@ -228,6 +289,32 @@ class PinjamanController extends Controller
         return response()->json($pinjaman);
     }
 
+    // Lapis kedua (defense in depth) selain guard di store(): pastikan anggota
+    // tidak akan punya 2+ pinjaman berstatus DISETUJUI secara bersamaan saat
+    // di-ACC. Guard di store() harusnya sudah cegah dari akarnya, tapi ini
+    // jaga-jaga untuk data lama yang kadung numpuk atau jalur lain yang lolos.
+    private function pastikanTidakNumpukPinjamanAktif(Pinjaman $pinjaman): ?string
+    {
+        $query = Pinjaman::where('user_id', $pinjaman->user_id)
+            ->where('status', 'DISETUJUI')
+            ->where('id', '!=', $pinjaman->id);
+
+        // Kalau ini pengajuan Top-Up, pinjaman lama yang jadi sumbernya WAJAR
+        // masih berstatus DISETUJUI di titik ini (baru akan ditutup otomatis
+        // setelah blok ini) -> jangan dianggap "numpuk".
+        if ($pinjaman->is_topup && $pinjaman->topup_dari_pinjaman_id) {
+            $query->where('id', '!=', $pinjaman->topup_dari_pinjaman_id);
+        }
+
+        $bentrok = $query->first();
+
+        if ($bentrok) {
+            return 'Anggota ini sudah punya pinjaman aktif lain #' . $bentrok->kode . ' yang belum lunas/tergabung. Tidak bisa ACC pengajuan ini sampai itu diselesaikan (lunasi, atau ajukan ulang sebagai Top-Up).';
+        }
+
+        return null;
+    }
+
     // POST /api/ketua/pinjaman/{id}/persetujuan -> Ketua approve final
     public function persetujuanKetua(Request $request, $id)
     {
@@ -238,6 +325,13 @@ class PinjamanController extends Controller
             'catatan_verifikasi' => 'nullable|string',
         ]);
 
+        if ($validated['status'] === 'DISETUJUI') {
+            $pesanBentrok = $this->pastikanTidakNumpukPinjamanAktif($pinjaman);
+            if ($pesanBentrok) {
+                return response()->json(['message' => $pesanBentrok], 422);
+            }
+        }
+
         DB::transaction(function () use ($request, $pinjaman, $validated) {
             $pinjaman->update([
                 ...$validated,
@@ -246,25 +340,7 @@ class PinjamanController extends Controller
 
             if ($validated['status'] === 'DISETUJUI') {
                 $pinjaman->generateCicilanSchedule();
-
-                // Kalau ini pengajuan Top-Up (anggota masih punya pinjaman aktif
-                // waktu mengajukan, lihat store()), begitu disetujui Ketua ->
-                // otomatis lunasi & tutup pinjaman lamanya. Tanpa ini, pinjaman
-                // lama nyangkut selamanya di status DISETUJUI walau member sudah
-                // menganggapnya "digabung" ke pinjaman baru.
-                if ($pinjaman->is_topup && $pinjaman->topup_dari_pinjaman_id) {
-                    $pinjamanLama = Pinjaman::find($pinjaman->topup_dari_pinjaman_id);
-
-                    if ($pinjamanLama && $pinjamanLama->status !== 'LUNAS') {
-                        $pinjamanLama->cicilans()->where('status', '!=', 'LUNAS')->update([
-                            'status' => 'LUNAS',
-                            'tanggal_bayar' => now()->toDateString(),
-                            'catatan' => 'Dilunasi otomatis - digabung ke pinjaman Top-Up baru #' . $pinjaman->kode,
-                            'dibayar_oleh' => $request->user()->id,
-                        ]);
-                        $pinjamanLama->update(['status' => 'LUNAS']);
-                    }
-                }
+                $this->tutupPinjamanLamaJikaTopup($pinjaman, $request->user()->id);
             }
         });
 
@@ -291,17 +367,30 @@ class PinjamanController extends Controller
             'catatan_verifikasi' => 'nullable|string',
         ]);
 
-        $pinjaman->update([
-            'status' => 'DISETUJUI',
-            'is_bypassed' => true,
-            'bypassed_by' => $request->user()->id,
-            'diverifikasi_oleh' => $request->user()->id,
-            'catatan_verifikasi' => $validated['catatan_verifikasi'] ?? 'Disetujui via Emergency Bypass Ketua',
-        ]);
+        $pesanBentrok = $this->pastikanTidakNumpukPinjamanAktif($pinjaman);
+        if ($pesanBentrok) {
+            return response()->json(['message' => $pesanBentrok], 422);
+        }
 
-        $pinjaman->generateCicilanSchedule();
+        DB::transaction(function () use ($request, $pinjaman, $validated) {
+            $pinjaman->update([
+                'status' => 'DISETUJUI',
+                'is_bypassed' => true,
+                'bypassed_by' => $request->user()->id,
+                'diverifikasi_oleh' => $request->user()->id,
+                'catatan_verifikasi' => $validated['catatan_verifikasi'] ?? 'Disetujui via Emergency Bypass Ketua',
+            ]);
 
-        return response()->json($pinjaman);
+            $pinjaman->generateCicilanSchedule();
+
+            // Bypass Queue tetap bisa dipakai buat pengajuan Top-Up (statusnya
+            // sama-sama MENUNGGU di antrean) -> pinjaman lama harus tetap
+            // otomatis dilunasi sama seperti jalur ACC normal, pakai helper
+            // yang sama dengan persetujuanKetua() supaya tidak ada lagi celah.
+            $this->tutupPinjamanLamaJikaTopup($pinjaman, $request->user()->id);
+        });
+
+        return response()->json($pinjaman->fresh());
     }
 
     // POST /api/ketua/pinjaman/{id}/restrukturisasi

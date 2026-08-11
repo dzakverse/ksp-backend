@@ -92,7 +92,7 @@ class AnggotaController extends Controller
                 'tenor_bulan' => $pinjamanAktif->tenor_bulan,
             ] : null,
             'daftar_pinjaman' => $anggota->pinjamans()
-                ->with(['cicilans', 'pinjamanLama:id,kode'])
+                ->with(['cicilans', 'pinjamanLama:id,kode', 'topupDariPinjaman:id,kode'])
                 ->orderByDesc('created_at')
                 ->get()
                 ->map(fn ($p) => [
@@ -105,6 +105,8 @@ class AnggotaController extends Controller
                     'created_at' => $p->created_at,
                     'is_restrukturisasi' => (bool) $p->is_restrukturisasi,
                     'pinjaman_lama_kode' => $p->pinjamanLama?->kode,
+                    'is_topup' => (bool) $p->is_topup,
+                    'topup_dari_pinjaman_kode' => $p->topupDariPinjaman?->kode,
                     'cicilan' => $p->cicilans->sortBy('cicilan_ke')->values(),
                 ]),
             'riwayat_simpanan' => $anggota->simpanans()->orderByDesc('tanggal')->take(20)->get(),
