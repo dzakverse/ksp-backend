@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Pinjaman;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class PinjamanController extends Controller
 {
@@ -20,10 +21,6 @@ class PinjamanController extends Controller
             $aktif->load('cicilans');
             $totalDibayar = $aktif->cicilans->where('status', 'LUNAS')->sum('jumlah');
 
-            // Ambil nominal angsuran dari jadwal cicilan yang sudah di-generate
-            // (generateCicilanSchedule() sudah menghitung pokok + bunga dengan benar).
-            // Fallback ke pokok+bunga manual hanya kalau cicilan belum ter-generate
-            // sama sekali (harusnya tidak terjadi untuk pinjaman berstatus DISETUJUI).
             $cicilanPertama = $aktif->cicilans->sortBy('cicilan_ke')->first();
             if ($cicilanPertama) {
                 $angsuranPerBulan = $cicilanPertama->jumlah;
@@ -55,27 +52,49 @@ class PinjamanController extends Controller
     // POST /api/pinjaman -> pengajuan baru (pages/ajukan.jsx)
     public function store(Request $request)
     {
-        $plafon = \App\Models\Kebijakan::current()->plafon_maksimal;
+        $kebijakan = \App\Models\Kebijakan::current();
+        $plafon = $kebijakan->plafon_maksimal ?? 50000000;
 
         $validated = $request->validate([
             'jumlah' => ['required', 'numeric', 'min:100000', "max:{$plafon}"],
             'tenor_bulan' => 'required|integer|min:1|max:36',
             'alasan' => 'nullable|string',
+            'keterangan' => 'nullable|string',
         ], [
             'jumlah.max' => 'Nominal pengajuan melebihi plafon maksimal yang berlaku (Rp ' . number_format($plafon, 0, ',', '.') . ').',
         ]);
 
-        $pinjaman = $request->user()->pinjamans()->create([
-            ...$validated,
-            'kode' => 'LN-' . now()->format('Y') . '-' . str_pad(Pinjaman::count() + 1, 3, '0', STR_PAD_LEFT),
-            'status' => 'MENUNGGU',
-        ]);
+        try {
+            DB::beginTransaction();
 
-        return response()->json($pinjaman, 201);
+            // Mencegah crash jika input bernama 'keterangan' alih-alih 'alasan'
+            $alasan = $request->input('alasan') ?? $request->input('keterangan') ?? '-';
+
+            $pinjaman = $request->user()->pinjamans()->create([
+                'kode' => 'LN-' . now()->format('Y') . '-' . str_pad(Pinjaman::count() + 1, 3, '0', STR_PAD_LEFT),
+                'jumlah' => $validated['jumlah'],
+                'tenor_bulan' => $validated['tenor_bulan'],
+                'sisa_pokok' => $validated['jumlah'], // Wajib diisi agar database tidak error
+                'alasan' => $alasan,
+                'status' => 'MENUNGGU',
+            ]);
+
+            DB::commit();
+
+            return response()->json($pinjaman, 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            // Mengembalikan pesan error log yang jelas ke frontend
+            return response()->json([
+                'message' => 'Gagal memproses pengajuan pinjaman di server.',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
-    // GET /api/admin/pinjaman -> dipakai Bendahara (VerifikasiPinjaman.jsx) & Ketua (PersetujuanPinjaman.jsx)
-    // Query params: status (filter tunggal, mis. MENUNGGU / DISETUJUI_BENDAHARA), search, sort, page
+    // GET /api/admin/pinjaman -> dipakai Bendahara & Ketua
     public function indexAll(Request $request)
     {
         $query = Pinjaman::with('user');
@@ -94,8 +113,6 @@ class PinjamanController extends Controller
             default => $query->latest(),
         };
 
-        // Jika status difilter -> kembalikan sebagai antrean (dipaginate).
-        // Jika tidak -> kembalikan snapshot antrean MENUNGGU + riwayat gabungan (dipakai Bendahara).
         if ($status) {
             $antrean = $query->paginate(10, ['*'], 'antrean_page');
 
@@ -119,16 +136,11 @@ class PinjamanController extends Controller
         ]);
     }
 
-    // GET /api/admin/pinjaman/{pinjaman} -> pages/admin/VerifikasiDetail.jsx
+    // GET /api/admin/pinjaman/{pinjaman}
     public function show(Pinjaman $pinjaman)
     {
         $pinjaman->load('user');
 
-        // Simulasi cicilan. Disamakan dengan rumus yang dipakai anggota saat
-        // pengajuan (pages/ajukan.jsx) dan generateCicilanSchedule() di model
-        // Pinjaman: bunga bulanan dinamis dari Kebijakan (bisa diubah Ketua),
-        // biaya admin 1% dari nominal (dipotong sekali dari saldo cair, BUKAN
-        // komponen cicilan bulanan).
         $bungaPersen = $pinjaman->suku_bunga_persen ?? \App\Models\Kebijakan::current()->suku_bunga_persen;
         $biayaAdminRate = 0.01;
         $biayaAdmin = $pinjaman->jumlah * $biayaAdminRate;
@@ -149,9 +161,11 @@ class PinjamanController extends Controller
         ]);
     }
 
-    // POST /api/admin/pinjaman/{id}/verifikasi -> Bendahara verifikasi (VerifikasiDetail.jsx)
-    public function verifikasi(Request $request, Pinjaman $pinjaman)
+    // POST /api/admin/pinjaman/{id}/verifikasi -> Bendahara verifikasi
+    public function verifikasi(Request $request, $id)
     {
+        $pinjaman = Pinjaman::findOrFail($id);
+
         $validated = $request->validate([
             'status' => 'required|in:DISETUJUI_BENDAHARA,DITOLAK',
             'catatan_verifikasi' => 'nullable|string',
@@ -165,9 +179,11 @@ class PinjamanController extends Controller
         return response()->json($pinjaman);
     }
 
-    // POST /api/ketua/pinjaman/{id}/persetujuan -> Ketua approve final (PersetujuanPinjaman.jsx)
-    public function persetujuanKetua(Request $request, Pinjaman $pinjaman)
+    // POST /api/ketua/pinjaman/{id}/persetujuan -> Ketua approve final
+    public function persetujuanKetua(Request $request, $id)
     {
+        $pinjaman = Pinjaman::findOrFail($id);
+
         $validated = $request->validate([
             'status' => 'required|in:DISETUJUI,DITOLAK',
             'catatan_verifikasi' => 'nullable|string',
@@ -185,9 +201,7 @@ class PinjamanController extends Controller
         return response()->json($pinjaman);
     }
 
-    // GET /api/ketua/pinjaman/bypass-queue -> pages/ketua/EmergencyBypass.jsx
-    // Ambil SELURUH pengajuan berstatus MENUNGGU, diurutkan dari yang paling lama
-    // mengajukan (paling mendesak) ke yang paling baru.
+    // GET /api/ketua/pinjaman/bypass-queue
     public function bypassQueue()
     {
         $antrean = Pinjaman::with('user')->where('status', 'MENUNGGU')->oldest()->get();
@@ -198,9 +212,11 @@ class PinjamanController extends Controller
         ]);
     }
 
-    // POST /api/ketua/pinjaman/{id}/bypass -> eksekusi Emergency Bypass (skip semua tahap verifikasi)
-    public function bypass(Request $request, Pinjaman $pinjaman)
+    // POST /api/ketua/pinjaman/{id}/bypass
+    public function bypass(Request $request, $id)
     {
+        $pinjaman = Pinjaman::findOrFail($id);
+
         $validated = $request->validate([
             'catatan_verifikasi' => 'nullable|string',
         ]);
@@ -218,14 +234,11 @@ class PinjamanController extends Controller
         return response()->json($pinjaman);
     }
 
-    // POST /api/ketua/pinjaman/{pinjaman}/restrukturisasi -> Ketua menggabungkan sisa
-    // pinjaman lama yang masih aktif dengan pengajuan pinjaman baru (top-up).
-    // Contoh: Pinjaman Lama (sisa 7jt) + Pinjaman Baru (3jt) = Total Hutang Baru 10jt.
-    // Pinjaman lama otomatis ditutup (LUNAS) dan seluruh cicilan sisa dianggap
-    // terbayar lewat penggabungan; pinjaman baru langsung DISETUJUI dengan jadwal
-    // cicilan baru dari total gabungan.
-    public function restrukturisasi(Request $request, Pinjaman $pinjaman)
+    // POST /api/ketua/pinjaman/{id}/restrukturisasi
+    public function restrukturisasi(Request $request, $id)
     {
+        $pinjaman = Pinjaman::findOrFail($id);
+
         $validated = $request->validate([
             'jumlah_tambahan' => 'required|numeric|min:1',
             'tenor_bulan' => 'required|integer|min:1|max:36',
@@ -256,8 +269,7 @@ class PinjamanController extends Controller
             . ') + Pinjaman Baru (Rp ' . number_format($jumlahTambahan, 0, ',', '.')
             . ') = Total Hutang Baru Rp ' . number_format($jumlahBaru, 0, ',', '.');
 
-        $baru = \Illuminate\Support\Facades\DB::transaction(function () use ($request, $pinjaman, $validated, $sisaPokokLama, $jumlahBaru, $ringkasan) {
-            // Tutup pinjaman lama: seluruh cicilan sisa dianggap lunas lewat penggabungan
+        $baru = DB::transaction(function () use ($request, $pinjaman, $validated, $sisaPokokLama, $jumlahBaru, $ringkasan) {
             $pinjaman->cicilans()->where('status', 'BELUM_BAYAR')->update([
                 'status' => 'LUNAS',
                 'tanggal_bayar' => now()->toDateString(),
@@ -271,6 +283,7 @@ class PinjamanController extends Controller
                 'user_id' => $pinjaman->user_id,
                 'pinjaman_lama_id' => $pinjaman->id,
                 'jumlah' => $jumlahBaru,
+                'sisa_pokok' => $jumlahBaru,
                 'tenor_bulan' => $validated['tenor_bulan'],
                 'suku_bunga_persen' => $pinjaman->suku_bunga_persen,
                 'status' => 'DISETUJUI',
@@ -281,14 +294,12 @@ class PinjamanController extends Controller
                 'diverifikasi_oleh' => $request->user()->id,
                 'created_by' => $request->user()->id,
             ]);
-            // generateCicilanSchedule() otomatis terpanggil lewat model event Pinjaman::booted()
-            // karena status baru ini langsung DISETUJUI.
         });
 
         return response()->json($baru->fresh('cicilans'), 201);
     }
 
-    // POST /api/admin/cicilan/{cicilan}/bayar -> Bendahara konfirmasi pembayaran 1 angsuran
+    // POST /api/admin/cicilan/{cicilan}/bayar
     public function bayarCicilan(Request $request, \App\Models\Cicilan $cicilan)
     {
         $validated = $request->validate([
@@ -305,6 +316,12 @@ class PinjamanController extends Controller
             'catatan' => $validated['catatan'],
             'dibayar_oleh' => $request->user()->id,
         ]);
+
+        $pinjaman = $cicilan->pinjaman;
+        $masihAdaBelumLunas = $pinjaman->cicilans()->where('status', '!=', 'LUNAS')->exists();
+        if (!$masihAdaBelumLunas) {
+            $pinjaman->update(['status' => 'LUNAS']);
+        }
 
         return response()->json($cicilan->fresh());
     }
