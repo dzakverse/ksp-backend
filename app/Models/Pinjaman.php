@@ -31,7 +31,36 @@ class Pinjaman extends Model
         'pinjaman_lama_id',
         'is_restrukturisasi',
         'sisa_pokok_lama',
+        'sisa_pokok',           // Kolom NOT NULL di DB -> wajib ada di fillable,
+                                // kalau tidak, Eloquent diam-diam membuang nilainya
+                                // saat create() dan insert gagal (500).
+        'is_topup',
+        'topup_dari_pinjaman_id',
+        'potongan_pelunasan',
+        'jumlah_pencairan_bersih',
     ];
+
+    /**
+     * Generate kode pinjaman berurutan per-tahun (mis. LN-2026-009).
+     *
+     * PENTING: angka urut diambil dari nilai TERTINGGI yang pernah dipakai
+     * (bukan dari jumlah baris/count()), supaya tidak collide dengan kode
+     * yang masih ada begitu ada pinjaman lain yang dihapus (mis. lewat
+     * Filament). count()+1 akan "mundur" dan menabrak kode existing kalau
+     * ada baris di tengah yang dihapus - generateKode() ini aman dari itu.
+     */
+    public static function generateKode(): string
+    {
+        $prefix = 'LN-' . now()->format('Y') . '-';
+
+        $nomorTerakhir = static::where('kode', 'like', $prefix . '%')
+            ->selectRaw('MAX(CAST(SUBSTRING(kode, ?) AS UNSIGNED)) as nomor_max', [strlen($prefix) + 1])
+            ->value('nomor_max');
+
+        $nomorBerikutnya = ((int) $nomorTerakhir) + 1;
+
+        return $prefix . str_pad($nomorBerikutnya, 3, '0', STR_PAD_LEFT);
+    }
 
     /**
      * Auto-generate jadwal cicilan begitu status pinjaman menjadi DISETUJUI,
@@ -63,7 +92,21 @@ class Pinjaman extends Model
             'is_bypassed' => 'boolean',
             'is_restrukturisasi' => 'boolean',
             'sisa_pokok_lama' => 'decimal:2',
+            'sisa_pokok' => 'decimal:2',
+            'is_topup' => 'boolean',
+            'potongan_pelunasan' => 'decimal:2',
+            'jumlah_pencairan_bersih' => 'decimal:2',
         ];
+    }
+
+    /**
+     * Relasi ke pinjaman lama yang jadi dasar Top-Up (diajukan mandiri oleh Anggota
+     * lewat ajukan.jsx saat masih punya pinjaman aktif) - beda dari pinjamanLama()
+     * yang khusus jalur Restrukturisasi manual oleh Ketua.
+     */
+    public function topupDariPinjaman(): BelongsTo
+    {
+        return $this->belongsTo(Pinjaman::class, 'topup_dari_pinjaman_id');
     }
 
     /**

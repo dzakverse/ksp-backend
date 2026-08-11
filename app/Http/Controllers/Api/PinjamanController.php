@@ -70,13 +70,62 @@ class PinjamanController extends Controller
             // Mencegah crash jika input bernama 'keterangan' alih-alih 'alasan'
             $alasan = $request->input('alasan') ?? $request->input('keterangan') ?? '-';
 
+            // ---- Deteksi mode Top-Up: anggota masih punya pinjaman aktif? ----
+            // Ini yang tadinya CUMA dicek di frontend (ajukan.jsx) buat nampilin
+            // banner "Top-Up", tapi datanya tidak pernah dikirim/disimpan ke
+            // backend -> makanya pinjaman lama tidak pernah otomatis ke-lunas
+            // begitu top-up-nya di-ACC Ketua. Sekarang dicek & disimpan di sini.
+            $pinjamanAktif = $request->user()->pinjamans()->where('status', 'DISETUJUI')->first();
+            $dataTopup = [];
+
+            if ($pinjamanAktif) {
+                $pinjamanAktif->load('cicilans');
+                $totalDibayar = $pinjamanAktif->cicilans->where('status', 'LUNAS')->sum('jumlah');
+                $sisaPinjamanLama = round($pinjamanAktif->jumlah - $totalDibayar, 2);
+
+                if ($validated['jumlah'] <= $sisaPinjamanLama) {
+                    DB::rollBack();
+                    return response()->json([
+                        'message' => 'Nominal Top-Up harus lebih besar dari sisa pinjaman lama (Rp ' . number_format($sisaPinjamanLama, 0, ',', '.') . ').',
+                    ], 422);
+                }
+
+                $tenorLunas = $pinjamanAktif->cicilans->where('status', 'LUNAS')->count();
+                $progressPersen = $pinjamanAktif->tenor_bulan > 0
+                    ? ($tenorLunas / $pinjamanAktif->tenor_bulan) * 100
+                    : 0;
+                $minimalProgress = (float) ($kebijakan->minimal_progress_topup_persen ?? 30);
+
+                if ($progressPersen < $minimalProgress) {
+                    DB::rollBack();
+                    return response()->json([
+                        'message' => "Pengajuan Top-Up belum memenuhi syarat: minimal {$minimalProgress}% tenor pinjaman lama harus lunas dulu (saat ini baru " . round($progressPersen) . "%).",
+                    ], 422);
+                }
+
+                $biayaAdmin = $validated['jumlah'] * 0.01;
+
+                $dataTopup = [
+                    'is_topup' => true,
+                    'topup_dari_pinjaman_id' => $pinjamanAktif->id,
+                    'potongan_pelunasan' => $sisaPinjamanLama,
+                    'jumlah_pencairan_bersih' => round($validated['jumlah'] - $sisaPinjamanLama - $biayaAdmin, 2),
+                ];
+            }
+
             $pinjaman = $request->user()->pinjamans()->create([
-                'kode' => 'LN-' . now()->format('Y') . '-' . str_pad(Pinjaman::count() + 1, 3, '0', STR_PAD_LEFT),
+                'kode' => Pinjaman::generateKode(),
                 'jumlah' => $validated['jumlah'],
                 'tenor_bulan' => $validated['tenor_bulan'],
                 'sisa_pokok' => $validated['jumlah'], // Wajib diisi agar database tidak error
+                // Snapshot suku bunga yang berlaku SEKARANG ke pinjaman ini secara
+                // permanen -> tanpa ini nilainya nyangkut di default kolom (0), dan
+                // "Progres Cicilan" (Anggota) maupun simulasi verifikasi (Bendahara)
+                // sama-sama menghitung bunga jadi Rp 0 walau Kebijakan sudah di-set.
+                'suku_bunga_persen' => $kebijakan->suku_bunga_persen,
                 'alasan' => $alasan,
                 'status' => 'MENUNGGU',
+                ...$dataTopup,
             ]);
 
             DB::commit();
@@ -189,16 +238,37 @@ class PinjamanController extends Controller
             'catatan_verifikasi' => 'nullable|string',
         ]);
 
-        $pinjaman->update([
-            ...$validated,
-            'diverifikasi_oleh' => $request->user()->id,
-        ]);
+        DB::transaction(function () use ($request, $pinjaman, $validated) {
+            $pinjaman->update([
+                ...$validated,
+                'diverifikasi_oleh' => $request->user()->id,
+            ]);
 
-        if ($validated['status'] === 'DISETUJUI') {
-            $pinjaman->generateCicilanSchedule();
-        }
+            if ($validated['status'] === 'DISETUJUI') {
+                $pinjaman->generateCicilanSchedule();
 
-        return response()->json($pinjaman);
+                // Kalau ini pengajuan Top-Up (anggota masih punya pinjaman aktif
+                // waktu mengajukan, lihat store()), begitu disetujui Ketua ->
+                // otomatis lunasi & tutup pinjaman lamanya. Tanpa ini, pinjaman
+                // lama nyangkut selamanya di status DISETUJUI walau member sudah
+                // menganggapnya "digabung" ke pinjaman baru.
+                if ($pinjaman->is_topup && $pinjaman->topup_dari_pinjaman_id) {
+                    $pinjamanLama = Pinjaman::find($pinjaman->topup_dari_pinjaman_id);
+
+                    if ($pinjamanLama && $pinjamanLama->status !== 'LUNAS') {
+                        $pinjamanLama->cicilans()->where('status', '!=', 'LUNAS')->update([
+                            'status' => 'LUNAS',
+                            'tanggal_bayar' => now()->toDateString(),
+                            'catatan' => 'Dilunasi otomatis - digabung ke pinjaman Top-Up baru #' . $pinjaman->kode,
+                            'dibayar_oleh' => $request->user()->id,
+                        ]);
+                        $pinjamanLama->update(['status' => 'LUNAS']);
+                    }
+                }
+            }
+        });
+
+        return response()->json($pinjaman->fresh());
     }
 
     // GET /api/ketua/pinjaman/bypass-queue
@@ -279,7 +349,7 @@ class PinjamanController extends Controller
             $pinjaman->update(['status' => 'LUNAS']);
 
             return Pinjaman::create([
-                'kode' => 'LN-' . now()->format('Y') . '-' . str_pad(Pinjaman::count() + 1, 3, '0', STR_PAD_LEFT),
+                'kode' => Pinjaman::generateKode(),
                 'user_id' => $pinjaman->user_id,
                 'pinjaman_lama_id' => $pinjaman->id,
                 'jumlah' => $jumlahBaru,
@@ -323,6 +393,13 @@ class PinjamanController extends Controller
             $pinjaman->update(['status' => 'LUNAS']);
         }
 
-        return response()->json($cicilan->fresh());
+        // Sertakan status pinjaman TERBARU di response -> tanpa ini, frontend cuma
+        // dapat data cicilan-nya saja dan tidak tahu status induk pinjaman ikut
+        // berubah jadi LUNAS, jadi card di halaman Data Anggota tetap kebaca
+        // "Aktif/Berjalan" sampai halaman di-refresh manual.
+        return response()->json([
+            'cicilan' => $cicilan->fresh(),
+            'pinjaman_status' => $pinjaman->fresh()->status,
+        ]);
     }
 }
