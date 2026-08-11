@@ -19,7 +19,20 @@ class PinjamanController extends Controller
         if ($aktif) {
             $aktif->load('cicilans');
             $totalDibayar = $aktif->cicilans->where('status', 'LUNAS')->sum('jumlah');
-            $angsuranPerBulan = $aktif->tenor_bulan > 0 ? $aktif->jumlah / $aktif->tenor_bulan : 0;
+
+            // Ambil nominal angsuran dari jadwal cicilan yang sudah di-generate
+            // (generateCicilanSchedule() sudah menghitung pokok + bunga dengan benar).
+            // Fallback ke pokok+bunga manual hanya kalau cicilan belum ter-generate
+            // sama sekali (harusnya tidak terjadi untuk pinjaman berstatus DISETUJUI).
+            $cicilanPertama = $aktif->cicilans->sortBy('cicilan_ke')->first();
+            if ($cicilanPertama) {
+                $angsuranPerBulan = $cicilanPertama->jumlah;
+            } else {
+                $bungaPersen = $aktif->suku_bunga_persen ?? \App\Models\Kebijakan::current()->suku_bunga_persen;
+                $pokokBulanan = $aktif->tenor_bulan > 0 ? $aktif->jumlah / $aktif->tenor_bulan : 0;
+                $bungaBulanan = $aktif->jumlah * ($bungaPersen / 100);
+                $angsuranPerBulan = $pokokBulanan + $bungaBulanan;
+            }
 
             $pinjamanAktif = [
                 'kode' => $aktif->kode,
@@ -111,20 +124,27 @@ class PinjamanController extends Controller
     {
         $pinjaman->load('user');
 
-        // Simulasi cicilan sederhana (bunga flat). TODO: hubungkan ke tabel kebijakan
-        // (lihat KebijakanController) begitu nilainya ingin dibuat dinamis oleh Ketua.
-        $bungaPersen = 0.01; // 1% flat/bulan
-        $biayaAdmin = 15000;
+        // Simulasi cicilan. Disamakan dengan rumus yang dipakai anggota saat
+        // pengajuan (pages/ajukan.jsx) dan generateCicilanSchedule() di model
+        // Pinjaman: bunga bulanan dinamis dari Kebijakan (bisa diubah Ketua),
+        // biaya admin 1% dari nominal (dipotong sekali dari saldo cair, BUKAN
+        // komponen cicilan bulanan).
+        $bungaPersen = $pinjaman->suku_bunga_persen ?? \App\Models\Kebijakan::current()->suku_bunga_persen;
+        $biayaAdminRate = 0.01;
+        $biayaAdmin = $pinjaman->jumlah * $biayaAdminRate;
         $pokokBulanan = $pinjaman->tenor_bulan > 0 ? $pinjaman->jumlah / $pinjaman->tenor_bulan : 0;
-        $bunga = $pinjaman->jumlah * $bungaPersen;
+        $bunga = $pinjaman->jumlah * ($bungaPersen / 100);
 
         return response()->json([
             'pinjaman' => $pinjaman,
             'simulasi' => [
                 'pokok_bulanan' => round($pokokBulanan),
                 'bunga' => round($bunga),
-                'biaya_admin' => $biayaAdmin,
-                'total_per_bulan' => round($pokokBulanan + $bunga + $biayaAdmin),
+                'bunga_persen' => (float) $bungaPersen,
+                'biaya_admin' => round($biayaAdmin),
+                'biaya_admin_persen' => $biayaAdminRate * 100,
+                'uang_diterima' => round($pinjaman->jumlah - $biayaAdmin),
+                'total_per_bulan' => round($pokokBulanan + $bunga),
             ],
         ]);
     }
