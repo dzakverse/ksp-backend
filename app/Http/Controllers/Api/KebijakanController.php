@@ -21,6 +21,11 @@ class KebijakanController extends Controller
             'plafon_maksimal' => 'sometimes|numeric|min:0',
             'suku_bunga_persen' => 'sometimes|numeric|min:0|max:100',
             'simpanan_wajib_nominal' => 'sometimes|numeric|min:0',
+            // Field ini sudah dikirim frontend (KendaliKebijakan.jsx) tapi belum
+            // pernah didaftarkan di sini -> validate() otomatis membuang field
+            // yang tidak ada aturannya, jadi angkanya tidak pernah tersimpan
+            // walau request-nya sukses (200 OK tanpa efek apa-apa).
+            'minimal_progress_topup_persen' => 'sometimes|numeric|min:0|max:100',
             'catatan_terakhir' => 'nullable|string',
         ]);
 

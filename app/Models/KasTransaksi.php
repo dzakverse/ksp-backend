@@ -29,4 +29,21 @@ class KasTransaksi extends Model
     {
         return $this->belongsTo(User::class, 'dicatat_oleh');
     }
+
+    /**
+     * Hitung saldo kas koperasi saat ini. Dipusatkan di sini (bukan duplikat
+     * rumus di beberapa controller) supaya KasController::index(), tarik(),
+     * dan validasi kas-cukup di PinjamanController::store() semuanya selalu
+     * pakai angka yang sama persis.
+     */
+    public static function saldoSaatIni(): float
+    {
+        $totalSimpanan = \App\Models\Simpanan::where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah')
+            - \App\Models\Simpanan::where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah');
+        $totalPinjamanAktif = \App\Models\Pinjaman::where('status', 'DISETUJUI')->sum('jumlah');
+        $totalKasKeluar = static::where('tipe', 'KELUAR')->sum('jumlah');
+        $totalKasMasuk = static::where('tipe', 'MASUK')->sum('jumlah');
+
+        return (float) ($totalSimpanan - $totalPinjamanAktif + $totalKasMasuk - $totalKasKeluar);
+    }
 }

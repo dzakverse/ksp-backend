@@ -3,10 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Kebijakan;
 use App\Models\KasTransaksi;
-use App\Models\Pinjaman;
-use App\Models\Simpanan;
 use Illuminate\Http\Request;
 
 class KasController extends Controller
@@ -14,17 +11,18 @@ class KasController extends Controller
     // GET /api/admin/kas -> riwayat pengeluaran/pemasukan kas + saldo kas saat ini
     public function index()
     {
-        $totalSimpanan = Simpanan::where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah')
-            - Simpanan::where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah');
-        $totalPinjamanAktif = Pinjaman::where('status', 'DISETUJUI')->sum('jumlah');
-        $totalKasKeluar = KasTransaksi::where('tipe', 'KELUAR')->sum('jumlah');
-        $totalKasMasuk = KasTransaksi::where('tipe', 'MASUK')->sum('jumlah');
-
-        $saldoKas = $totalSimpanan - $totalPinjamanAktif + $totalKasMasuk - $totalKasKeluar;
-
         return response()->json([
-            'saldo_kas' => $saldoKas,
+            'saldo_kas' => KasTransaksi::saldoSaatIni(),
             'riwayat' => KasTransaksi::with('dicatatOleh:id,nama')->latest()->take(30)->get(),
+        ]);
+    }
+
+    // GET /api/kas/saldo -> versi ringan buat Anggota (cek kas cukup sebelum ajukan pinjaman),
+    // tanpa expose riwayat transaksi kas yang sifatnya administratif.
+    public function saldo()
+    {
+        return response()->json([
+            'saldo_kas' => KasTransaksi::saldoSaatIni(),
         ]);
     }
 
@@ -35,6 +33,13 @@ class KasController extends Controller
             'jumlah' => 'required|numeric|min:1',
             'catatan' => 'required|string|max:500',
         ]);
+
+        $saldoSaatIni = KasTransaksi::saldoSaatIni();
+        if ($validated['jumlah'] > $saldoSaatIni) {
+            return response()->json([
+                'message' => 'Kas koperasi tidak mencukupi. Saldo kas saat ini hanya Rp ' . number_format($saldoSaatIni, 0, ',', '.') . '.',
+            ], 422);
+        }
 
         $kas = KasTransaksi::create([
             ...$validated,

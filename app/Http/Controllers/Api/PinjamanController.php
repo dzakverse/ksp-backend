@@ -174,6 +174,18 @@ class PinjamanController extends Controller
                 ];
             }
 
+            // ---- Guard kas koperasi: pengajuan tidak boleh melebihi saldo kas
+            // yang benar-benar tersedia sekarang. Tanpa ini, anggota tetap bisa
+            // mengajukan (dan Bendahara/Ketua bisa tetap meng-ACC) walau uang
+            // fisiknya sebenarnya tidak cukup di kas koperasi.
+            $saldoKas = \App\Models\KasTransaksi::saldoSaatIni();
+            if ($validated['jumlah'] > $saldoKas) {
+                DB::rollBack();
+                return response()->json([
+                    'message' => 'Pengajuan tidak bisa diproses karena kas koperasi tidak mencukupi. Saldo kas saat ini hanya Rp ' . number_format($saldoKas, 0, ',', '.') . '.',
+                ], 422);
+            }
+
             $pinjaman = $request->user()->pinjamans()->create([
                 'kode' => Pinjaman::generateKode(),
                 'jumlah' => $validated['jumlah'],

@@ -33,6 +33,10 @@ Route::middleware('auth:sanctum')->group(function () {
     // Kebijakan (read-only untuk semua role, mis. cek limit plafon di form Ajukan Pinjaman)
     Route::get('/kebijakan', [KebijakanController::class, 'show']);
 
+    // Saldo kas koperasi (read-only untuk semua role, dipakai form Ajukan Pinjaman
+    // buat cek "kas cukup atau tidak" sebelum submit)
+    Route::get('/kas/saldo', [KasController::class, 'saldo']);
+
     // ---- BENDAHARA (KETUA juga boleh akses) ----
     Route::middleware('role:BENDAHARA,KETUA')->prefix('admin')->group(function () {
         Route::get('/dashboard', [DashboardController::class, 'adminIndex']);

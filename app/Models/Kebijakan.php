@@ -11,6 +11,9 @@ class Kebijakan extends Model
         'plafon_maksimal',
         'suku_bunga_persen',
         'simpanan_wajib_nominal',
+        // Tanpa ini, Eloquent diam-diam membuang field ini saat update() walau
+        // sudah lolos validasi -> angkanya kelihatan "gagal berubah" di UI.
+        'minimal_progress_topup_persen',
         'catatan_terakhir',
         'updated_by',
     ];
@@ -21,6 +24,7 @@ class Kebijakan extends Model
             'plafon_maksimal' => 'decimal:2',
             'suku_bunga_persen' => 'decimal:2',
             'simpanan_wajib_nominal' => 'decimal:2',
+            'minimal_progress_topup_persen' => 'decimal:2',
         ];
     }
 
