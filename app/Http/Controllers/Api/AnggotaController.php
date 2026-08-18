@@ -28,14 +28,16 @@ class AnggotaController extends Controller
 
         $paginated = $query->orderBy('nama')->paginate($perPage);
 
-        // Mapping data agar menyajikan struktur `saldo` lengkap untuk React
-        $items = collect($paginated->items())->map(function (User $user) {
-            $pokok = Simpanan::where('user_id', $user->id)->where('jenis', 'POKOK')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
-            $wajib = Simpanan::where('user_id', $user->id)->where('jenis', 'WAJIB')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
+        // Saldo semua anggota di halaman ini diambil dalam 1 query agregat
+        // (Simpanan::breakdownSaldoBanyakUser), bukan 4 query manual per anggota
+        // seperti sebelumnya -> untuk per_page=50 itu penghematan dari ~200
+        // query jadi 1 query.
+        $userIds = collect($paginated->items())->pluck('id');
+        $saldoPerUser = Simpanan::breakdownSaldoBanyakUser($userIds);
 
-            $sukarelaSetor = Simpanan::where('user_id', $user->id)->where('jenis', 'SUKARELA')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
-            $sukarelaTarik = Simpanan::where('user_id', $user->id)->where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah');
-            $sukarela = $sukarelaSetor - $sukarelaTarik;
+        // Mapping data agar menyajikan struktur `saldo` lengkap untuk React
+        $items = collect($paginated->items())->map(function (User $user) use ($saldoPerUser) {
+            $saldo = $saldoPerUser->get($user->id, ['pokok' => 0, 'wajib' => 0, 'sukarela' => 0, 'total' => 0]);
 
             return [
                 'id' => $user->id,
@@ -43,12 +45,7 @@ class AnggotaController extends Controller
                 'nip' => $user->nip,
                 'unit_kerja' => $user->unit_kerja ?? '-',
                 'status_keanggotaan' => $user->status_keanggotaan,
-                'saldo' => [
-                    'pokok' => (float) $pokok,
-                    'wajib' => (float) $wajib,
-                    'sukarela' => (float) $sukarela,
-                    'total' => (float) ($pokok + $wajib + $sukarela),
-                ],
+                'saldo' => $saldo,
             ];
         });
 
@@ -66,10 +63,7 @@ class AnggotaController extends Controller
     // GET /api/admin/anggota/{anggota} -> pages/admin/DetailAnggota.jsx
     public function show(User $anggota)
     {
-        $pokok = $anggota->simpanans()->where('jenis', 'POKOK')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
-        $wajib = $anggota->simpanans()->where('jenis', 'WAJIB')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
-        $sukarelaSetor = $anggota->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
-        $sukarelaTarik = $anggota->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah');
+        $saldo = Simpanan::breakdownSaldo($anggota->id);
 
         // Pinjaman aktif (jika ada) - agar Bendahara/Ketua bisa lihat sekilas saat membuka detail anggota
         $pinjamanAktif = $anggota->pinjamans()->where('status', 'DISETUJUI')->latest()->first();
@@ -80,12 +74,7 @@ class AnggotaController extends Controller
             'nip' => $anggota->nip,
             'unit_kerja' => $anggota->unit_kerja ?? '-',
             'status_keanggotaan' => $anggota->status_keanggotaan,
-            'saldo' => [
-                'pokok' => (float) $pokok,
-                'wajib' => (float) $wajib,
-                'sukarela' => (float) ($sukarelaSetor - $sukarelaTarik),
-                'total' => (float) ($pokok + $wajib + ($sukarelaSetor - $sukarelaTarik)),
-            ],
+            'saldo' => $saldo,
             'pinjaman_aktif' => $pinjamanAktif ? [
                 'kode' => $pinjamanAktif->kode,
                 'jumlah' => (float) $pinjamanAktif->jumlah,

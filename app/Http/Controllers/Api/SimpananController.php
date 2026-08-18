@@ -14,17 +14,13 @@ class SimpananController extends Controller
         $user = $request->user();
 
         $simpanans = $user->simpanans()->orderByDesc('tanggal')->get();
-
-        $totalPokok = $user->simpanans()->where('jenis', 'POKOK')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
-        $totalWajib = $user->simpanans()->where('jenis', 'WAJIB')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
-        $totalSukarelaSetor = $user->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
-        $totalSukarelaTarik = $user->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah');
+        $saldo = Simpanan::breakdownSaldo($user->id);
 
         return response()->json([
-            'total_pokok' => $totalPokok,
-            'total_wajib' => $totalWajib,
-            'total_sukarela' => $totalSukarelaSetor - $totalSukarelaTarik,
-            'total_keseluruhan' => $totalPokok + $totalWajib + ($totalSukarelaSetor - $totalSukarelaTarik),
+            'total_pokok' => $saldo['pokok'],
+            'total_wajib' => $saldo['wajib'],
+            'total_sukarela' => $saldo['sukarela'],
+            'total_keseluruhan' => $saldo['total'],
             'riwayat' => $simpanans,
         ]);
     }

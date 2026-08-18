@@ -24,11 +24,10 @@ class DashboardController extends Controller
             }
 
             // Hitung Sub Saldo Simpanan
-            $totalPokok = $user->simpanans()->where('jenis', 'POKOK')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah') ?? 0;
-            $totalWajib = $user->simpanans()->where('jenis', 'WAJIB')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah') ?? 0;
-            $sukarelaSetor = $user->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah') ?? 0;
-            $sukarelaTarik = $user->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah') ?? 0;
-            $totalSukarela = $sukarelaSetor - $sukarelaTarik;
+            $saldo = Simpanan::breakdownSaldo($user->id);
+            $totalPokok = $saldo['pokok'];
+            $totalWajib = $saldo['wajib'];
+            $totalSukarela = $saldo['sukarela'];
 
             // Gabungkan aktivitas simpanan
             $aktivitasSimpanan = $user->simpanans()->get()->map(function ($s) {
@@ -109,14 +108,11 @@ public function adminIndex(Request $request)
     {
         try {
             // 1. Total Simpanan Anggota berdasarkan jenis
-            $totalPokok = Simpanan::where('jenis', 'POKOK')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah') ?? 0;
-            $totalWajib = Simpanan::where('jenis', 'WAJIB')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah') ?? 0;
-            
-            $sukarelaSetor = Simpanan::where('jenis', 'SUKARELA')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah') ?? 0;
-            $sukarelaTarik = Simpanan::where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah') ?? 0;
-            $totalSukarela = $sukarelaSetor - $sukarelaTarik;
-
-            $totalSimpananAnggota = $totalPokok + $totalWajib + $totalSukarela;
+            $saldo = Simpanan::breakdownSaldoSemua();
+            $totalPokok = $saldo['pokok'];
+            $totalWajib = $saldo['wajib'];
+            $totalSukarela = $saldo['sukarela'];
+            $totalSimpananAnggota = $saldo['total'];
 
             // 2. Total Pinjaman Aktif (Sisa pokok pinjaman yang disetujui / belum lunas)
             $totalPinjamanAktif = Pinjaman::where('status', 'DISETUJUI')

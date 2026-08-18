@@ -269,6 +269,36 @@ class PinjamanController extends Controller
         $pokokBulanan = $pinjaman->tenor_bulan > 0 ? $pinjaman->jumlah / $pinjaman->tenor_bulan : 0;
         $bunga = $pinjaman->jumlah * ($bungaPersen / 100);
 
+        // Breakdown Top-Up untuk halaman Verifikasi Bendahara (VerifikasiDetail.jsx)
+        // & modal ACC Top-Up Ketua (PersetujuanPinjaman.jsx). Sebelumnya field ini
+        // TIDAK PERNAH dikirim dari sini walau kedua halaman itu sudah minta
+        // `topup_preview` -> card breakdown-nya selalu kosong/hilang di FE.
+        $topupPreview = null;
+
+        if ($pinjaman->is_topup && $pinjaman->topup_dari_pinjaman_id) {
+            $pinjamanLama = $pinjaman->topupDariPinjaman;
+
+            if ($pinjamanLama) {
+                $pinjamanLama->load('cicilans');
+                $tenorLunas = $pinjamanLama->cicilans->where('status', 'LUNAS')->count();
+                $progressPersen = $pinjamanLama->tenor_bulan > 0
+                    ? round(($tenorLunas / $pinjamanLama->tenor_bulan) * 100)
+                    : 0;
+
+                $topupPreview = [
+                    'pinjaman_lama_kode' => $pinjamanLama->kode,
+                    'progress_persen' => $progressPersen,
+                    // Dipakai nilai yang di-snapshot saat pengajuan (potongan_pelunasan /
+                    // jumlah_pencairan_bersih) supaya konsisten dengan angka yang sudah
+                    // ditampilkan ke anggota saat submit di ajukan.jsx, bukan dihitung
+                    // ulang dari sisa cicilan sekarang (bisa beda kalau ada cicilan yang
+                    // baru dibayar setelah pengajuan Top-Up ini dibuat).
+                    'sisa_pokok_saat_ini' => (float) $pinjaman->potongan_pelunasan,
+                    'pencairan_bersih' => (float) $pinjaman->jumlah_pencairan_bersih,
+                ];
+            }
+        }
+
         return response()->json([
             'pinjaman' => $pinjaman,
             'simulasi' => [
@@ -280,6 +310,7 @@ class PinjamanController extends Controller
                 'uang_diterima' => round($pinjaman->jumlah - $biayaAdmin),
                 'total_per_bulan' => round($pokokBulanan + $bunga),
             ],
+            'topup_preview' => $topupPreview,
         ]);
     }
 
@@ -391,6 +422,15 @@ class PinjamanController extends Controller
                 'bypassed_by' => $request->user()->id,
                 'diverifikasi_oleh' => $request->user()->id,
                 'catatan_verifikasi' => $validated['catatan_verifikasi'] ?? 'Disetujui via Emergency Bypass Ketua',
+                // Emergency Bypass = kebijakan kemanusiaan tanpa bunga. Frontend
+                // (EmergencyBypass.jsx -> getSimulasi()) SUDAH menampilkan simulasi
+                // 0% bunga ke Ketua sebelum dieksekusi, tapi sebelumnya field ini
+                // tidak pernah di-override di sini -> generateCicilanSchedule()
+                // otomatis terpanggil lewat hook saved() di atas dengan bunga NORMAL
+                // dari Kebijakan, jadi anggota tetap kena bunga penuh walau sudah
+                // dijanjikan 0% di layar Ketua. Di-set 0 di sini supaya jadwal
+                // cicilan yang ter-generate match persis dengan apa yang disetujui.
+                'suku_bunga_persen' => 0,
             ]);
 
             $pinjaman->generateCicilanSchedule();
