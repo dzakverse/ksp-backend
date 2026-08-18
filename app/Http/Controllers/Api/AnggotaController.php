@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Simpanan;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class AnggotaController extends Controller
@@ -144,28 +145,44 @@ class AnggotaController extends Controller
             'keterangan' => 'nullable|string',
         ]);
 
-        $totalSetor = $anggota->simpanans()->where('jenis', $validated['jenis'])->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
-        $totalTarik = $anggota->simpanans()->where('jenis', $validated['jenis'])->where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah');
-        $totalPending = $anggota->simpanans()->where('jenis', $validated['jenis'])->where('tipe', 'TARIK')->where('status', 'PENDING')->sum('jumlah');
-        $saldoTersedia = $totalSetor - $totalTarik - $totalPending;
+        // Dibungkus transaction + lock baris anggota, sama seperti pola di
+        // PinjamanController::store() & SimpananController::requestTarik(),
+        // supaya dua penarikan nyaris bersamaan (mis. dua pengurus, atau
+        // double-klik) tidak sama-sama lolos cek saldo sebelum salah satunya
+        // commit -> saldo anggota bisa jadi minus.
+        $saldoKurang = null;
 
-        if ($validated['jumlah'] > $saldoTersedia) {
+        $simpanan = DB::transaction(function () use ($request, $anggota, $validated, &$saldoKurang) {
+            User::where('id', $anggota->id)->lockForUpdate()->first();
+
+            $totalSetor = $anggota->simpanans()->where('jenis', $validated['jenis'])->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
+            $totalTarik = $anggota->simpanans()->where('jenis', $validated['jenis'])->where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah');
+            $totalPending = $anggota->simpanans()->where('jenis', $validated['jenis'])->where('tipe', 'TARIK')->where('status', 'PENDING')->sum('jumlah');
+            $saldoTersedia = $totalSetor - $totalTarik - $totalPending;
+
+            if ($validated['jumlah'] > $saldoTersedia) {
+                $saldoKurang = $saldoTersedia;
+                return null;
+            }
+
+            return $anggota->simpanans()->create([
+                'jenis' => $validated['jenis'],
+                'tipe' => 'TARIK',
+                'jumlah' => $validated['jumlah'],
+                'keterangan' => $validated['keterangan'] ?? 'Penarikan langsung oleh pengurus',
+                'status' => 'BERHASIL',
+                'tanggal' => now()->toDateString(),
+                'created_by' => $request->user()->id,
+                'diproses_oleh' => $request->user()->id,
+            ]);
+        });
+
+        if ($saldoKurang !== null) {
             return response()->json([
                 'message' => "Saldo Simpanan {$validated['jenis']} anggota ini tidak mencukupi.",
-                'saldo_tersedia' => $saldoTersedia,
+                'saldo_tersedia' => $saldoKurang,
             ], 422);
         }
-
-        $simpanan = $anggota->simpanans()->create([
-            'jenis' => $validated['jenis'],
-            'tipe' => 'TARIK',
-            'jumlah' => $validated['jumlah'],
-            'keterangan' => $validated['keterangan'] ?? 'Penarikan langsung oleh pengurus',
-            'status' => 'BERHASIL',
-            'tanggal' => now()->toDateString(),
-            'created_by' => $request->user()->id,
-            'diproses_oleh' => $request->user()->id,
-        ]);
 
         return response()->json($simpanan, 201);
     }

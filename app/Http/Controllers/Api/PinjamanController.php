@@ -319,6 +319,17 @@ class PinjamanController extends Controller
     {
         $pinjaman = Pinjaman::findOrFail($id);
 
+        // Guard status: cegah verifikasi dobel/mundur (mis. dua tab Bendahara,
+        // double-klik, atau link lama ke pengajuan yang sudah final). Tanpa ini,
+        // pinjaman yang sudah DISETUJUI Ketua (dan sudah punya jadwal cicilan)
+        // atau sudah DITOLAK tetap bisa "ditarik mundur" statusnya lewat endpoint
+        // ini, bikin data pinjaman & cicilan jadi tidak konsisten.
+        if ($pinjaman->status !== 'MENUNGGU') {
+            return response()->json([
+                'message' => 'Pengajuan ini sudah diproses sebelumnya (status saat ini: ' . $pinjaman->status . '). Tidak bisa diverifikasi ulang.',
+            ], 422);
+        }
+
         $validated = $request->validate([
             'status' => 'required|in:DISETUJUI_BENDAHARA,DITOLAK',
             'catatan_verifikasi' => 'nullable|string',

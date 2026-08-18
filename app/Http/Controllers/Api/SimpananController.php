@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Simpanan;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class SimpananController extends Controller
 {
@@ -38,27 +39,43 @@ class SimpananController extends Controller
 
         $user = $request->user();
 
-        $totalSetor = $user->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
-        $totalTarik = $user->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah');
-        $totalPending = $user->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->where('status', 'PENDING')->sum('jumlah');
-        $saldoTersedia = $totalSetor - $totalTarik - $totalPending;
+        // Dibungkus transaction + lock baris user, sama seperti pola di
+        // PinjamanController::store(). Tanpa ini, dua request tarik yang nyaris
+        // bersamaan (double-klik, atau dipanggil manual berkali-kali) bisa
+        // sama-sama lolos cek "saldo cukup?" sebelum salah satunya sempat
+        // commit ke DB -> saldo tersedia bisa jadi minus.
+        $saldoKurang = null;
 
-        if ($validated['jumlah'] > $saldoTersedia) {
+        $simpanan = DB::transaction(function () use ($user, $validated, &$saldoKurang) {
+            \App\Models\User::where('id', $user->id)->lockForUpdate()->first();
+
+            $totalSetor = $user->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah');
+            $totalTarik = $user->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->where('status', 'BERHASIL')->sum('jumlah');
+            $totalPending = $user->simpanans()->where('jenis', 'SUKARELA')->where('tipe', 'TARIK')->where('status', 'PENDING')->sum('jumlah');
+            $saldoTersedia = $totalSetor - $totalTarik - $totalPending;
+
+            if ($validated['jumlah'] > $saldoTersedia) {
+                $saldoKurang = $saldoTersedia;
+                return null;
+            }
+
+            return $user->simpanans()->create([
+                'jenis' => 'SUKARELA',
+                'tipe' => 'TARIK',
+                'jumlah' => $validated['jumlah'],
+                'keterangan' => $validated['keterangan'] ?? 'Request tarik mandiri oleh anggota',
+                'status' => 'PENDING',
+                'tanggal' => now()->toDateString(),
+                'created_by' => $user->id,
+            ]);
+        });
+
+        if ($saldoKurang !== null) {
             return response()->json([
                 'message' => 'Saldo Simpanan Sukarela tidak mencukupi untuk penarikan sejumlah itu.',
-                'saldo_tersedia' => $saldoTersedia,
+                'saldo_tersedia' => $saldoKurang,
             ], 422);
         }
-
-        $simpanan = $user->simpanans()->create([
-            'jenis' => 'SUKARELA',
-            'tipe' => 'TARIK',
-            'jumlah' => $validated['jumlah'],
-            'keterangan' => $validated['keterangan'] ?? 'Request tarik mandiri oleh anggota',
-            'status' => 'PENDING',
-            'tanggal' => now()->toDateString(),
-            'created_by' => $user->id,
-        ]);
 
         return response()->json($simpanan, 201);
     }
