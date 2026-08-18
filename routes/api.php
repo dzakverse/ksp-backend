@@ -33,6 +33,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/pinjaman', [PinjamanController::class, 'store']);
     Route::get('/profile', [ProfileController::class, 'show']);
     Route::put('/profile', [ProfileController::class, 'update']);
+    Route::post('/profile/foto', [ProfileController::class, 'updateFoto']);
 
     // Kebijakan (read-only untuk semua role, mis. cek limit plafon di form Ajukan Pinjaman)
     Route::get('/kebijakan', [KebijakanController::class, 'show']);
