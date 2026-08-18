@@ -86,4 +86,25 @@ class ProfileController extends Controller
             'foto_url' => $user->foto_url,
         ]);
     }
+
+    // DELETE /api/profile/foto -> hapus foto profil milik akun yang sedang
+    // login, balik ke tanpa-foto (FE akan otomatis nampilin avatar inisial
+    // dari nama begitu foto_url kosong - lihat components/Avatar.jsx).
+    public function hapusFoto(Request $request)
+    {
+        $user = $request->user();
+
+        // Hanya hapus file fisik dari storage kalau memang foto itu hasil
+        // upload lewat endpoint ini (bukan URL eksternal/seed lain), sama
+        // seperti pengecekan yang sudah ada di updateFoto().
+        if ($user->foto_url && str_contains($user->foto_url, '/storage/foto-profil/')) {
+            $path = ltrim(parse_url($user->foto_url, PHP_URL_PATH), '/');
+            $path = preg_replace('#^storage/#', '', $path);
+            Storage::disk('public')->delete($path);
+        }
+
+        $user->update(['foto_url' => null]);
+
+        return response()->json(['foto_url' => null]);
+    }
 }
