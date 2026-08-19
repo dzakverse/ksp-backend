@@ -5,6 +5,7 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\PinjamanResource\Pages;
 use App\Models\Pinjaman;
 use App\Models\User;
+use App\Services\PinjamanService;
 use Filament\Forms;
 use Filament\Forms\Components\Grid;
 use Filament\Forms\Components\Section;
@@ -99,7 +100,8 @@ class PinjamanResource extends Resource
                             TextInput::make('suku_bunga_persen')
                                 ->label('Suku Bunga (% per tahun)')
                                 ->numeric()
-                                ->default(0)
+                                ->default(fn () => PinjamanService::defaultSukuBunga())
+                                ->helperText(fn () => 'Mengikuti kebijakan aktif saat ini: ' . PinjamanService::defaultSukuBunga() . '% per tahun. Ubah manual hanya untuk kasus khusus (mis. input data historis/migrasi).')
                                 ->minValue(0)
                                 ->maxValue(100)
                                 ->reactive()
@@ -226,6 +228,18 @@ class PinjamanResource extends Resource
                     ->modalSubmitActionLabel('Ya, Setujui')
                     ->visible(fn (Pinjaman $record): bool => in_array($record->status, ['MENUNGGU', 'DISETUJUI_BENDAHARA']))
                     ->action(function (Pinjaman $record): void {
+                        $error = PinjamanService::validasiSebelumDisetujui($record);
+
+                        if ($error) {
+                            Notification::make()
+                                ->title('Tidak bisa disetujui')
+                                ->body($error)
+                                ->danger()
+                                ->send();
+
+                            return;
+                        }
+
                         $record->update([
                             'status' => 'DISETUJUI',
                             'is_bypassed' => true,

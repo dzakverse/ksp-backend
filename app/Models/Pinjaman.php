@@ -18,37 +18,26 @@ class Pinjaman extends Model
         'user_id', 
         'jumlah', 
         'tenor_bulan', 
-        'suku_bunga_persen',    // Ditambahkan dari versi uji coba (opsional)
-        'angsuran_per_bulan',   // Ditambahkan dari versi uji coba (opsional)
+        'suku_bunga_persen',    
+        'angsuran_per_bulan',  
         'alasan',
         'status', 
         'diverifikasi_oleh', 
         'catatan_verifikasi',
-        'bukti_pendukung',      // Ditambahkan jika ada upload berkas dari FE
+        'bukti_pendukung',
         'is_bypassed',
         'bypassed_by',
         'created_by',
         'pinjaman_lama_id',
         'is_restrukturisasi',
         'sisa_pokok_lama',
-        'sisa_pokok',           // Kolom NOT NULL di DB -> wajib ada di fillable,
-                                // kalau tidak, Eloquent diam-diam membuang nilainya
-                                // saat create() dan insert gagal (500).
+        'sisa_pokok',           
         'is_topup',
         'topup_dari_pinjaman_id',
         'potongan_pelunasan',
         'jumlah_pencairan_bersih',
     ];
 
-    /**
-     * Generate kode pinjaman berurutan per-tahun (mis. LN-2026-009).
-     *
-     * PENTING: angka urut diambil dari nilai TERTINGGI yang pernah dipakai
-     * (bukan dari jumlah baris/count()), supaya tidak collide dengan kode
-     * yang masih ada begitu ada pinjaman lain yang dihapus (mis. lewat
-     * Filament). count()+1 akan "mundur" dan menabrak kode existing kalau
-     * ada baris di tengah yang dihapus - generateKode() ini aman dari itu.
-     */
     public static function generateKode(): string
     {
         $prefix = 'LN-' . now()->format('Y') . '-';
@@ -62,15 +51,6 @@ class Pinjaman extends Model
         return $prefix . str_pad($nomorBerikutnya, 3, '0', STR_PAD_LEFT);
     }
 
-    /**
-     * Auto-generate jadwal cicilan begitu status pinjaman menjadi DISETUJUI,
-     * dari jalur MANAPUN (alur normal verifikasi/persetujuan, Emergency Bypass,
-     * ATAU input langsung oleh Super Admin lewat panel Filament). Tanpa hook ini,
-     * pinjaman yang dibuat langsung berstatus DISETUJUI oleh Super Admin tidak
-     * akan pernah punya cicilan, sehingga tracking-nya tidak muncul di halaman
-     * manapun (Anggota, Bendahara, Ketua). generateCicilanSchedule() sendiri
-     * idempotent (skip kalau cicilan sudah ada), jadi aman dipanggil berkali-kali.
-     */
     protected static function booted(): void
     {
         static::saved(function (Pinjaman $pinjaman) {
@@ -80,9 +60,6 @@ class Pinjaman extends Model
         });
     }
 
-    /**
-     * Casting tipe data desimal agar angka rupiah & persen presisi di Filament
-     */
     protected function casts(): array
     {
         return [
@@ -99,77 +76,45 @@ class Pinjaman extends Model
         ];
     }
 
-    /**
-     * Relasi ke pinjaman lama yang jadi dasar Top-Up (diajukan mandiri oleh Anggota
-     * lewat ajukan.jsx saat masih punya pinjaman aktif) - beda dari pinjamanLama()
-     * yang khusus jalur Restrukturisasi manual oleh Ketua.
-     */
     public function topupDariPinjaman(): BelongsTo
     {
         return $this->belongsTo(Pinjaman::class, 'topup_dari_pinjaman_id');
     }
 
-    /**
-     * Relasi ke pinjaman lama yang digabung/direstrukturisasi ke pinjaman ini.
-     */
     public function pinjamanLama(): BelongsTo
     {
         return $this->belongsTo(Pinjaman::class, 'pinjaman_lama_id');
     }
 
-    /**
-     * Relasi ke pinjaman baru hasil restrukturisasi dari pinjaman ini (jika ada).
-     */
     public function pinjamanBaru(): \Illuminate\Database\Eloquent\Relations\HasOne
     {
         return $this->hasOne(Pinjaman::class, 'pinjaman_lama_id');
     }
 
-    /**
-     * Relasi ke Anggota Peminjam
-     */
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class, 'user_id');
     }
 
-    /**
-     * Relasi ke Bendahara / Ketua yang memverifikasi di FE
-     */
     public function verifikator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'diverifikasi_oleh');
     }
 
-    /**
-     * Relasi ke Super Admin yang melakukan Bypass
-     */
     public function bypassedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'bypassed_by');
     }
 
-    /**
-     * Relasi ke Super Admin yang membuatkan draf pinjaman
-     */
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
     }
-
-    /**
-     * Relasi ke Tabel Cicilan / Angsuran
-     */
     public function cicilans(): HasMany
     {
         return $this->hasMany(Cicilan::class, 'pinjaman_id');
     }
 
-    /**
-     * Generate jadwal cicilan otomatis (dipanggil sekali saat status berubah
-     * menjadi DISETUJUI, baik lewat alur normal maupun Emergency Bypass).
-     * Idempotent: tidak akan generate ulang kalau sudah pernah ada cicilan.
-     */
     public function generateCicilanSchedule(): void
     {
         if ($this->cicilans()->exists()) {

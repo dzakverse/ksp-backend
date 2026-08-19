@@ -30,12 +30,6 @@ class KasTransaksi extends Model
         return $this->belongsTo(User::class, 'dicatat_oleh');
     }
 
-    /**
-     * Hitung saldo kas koperasi saat ini. Dipusatkan di sini (bukan duplikat
-     * rumus di beberapa controller) supaya KasController::index(), tarik(),
-     * dan validasi kas-cukup di PinjamanController::store() semuanya selalu
-     * pakai angka yang sama persis.
-     */
     public static function saldoSaatIni(): float
     {
         $totalSimpanan = \App\Models\Simpanan::where('tipe', 'SETOR')->where('status', 'BERHASIL')->sum('jumlah')

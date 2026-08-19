@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Pinjaman;
+use App\Services\PinjamanService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -143,12 +144,10 @@ class PinjamanController extends Controller
                 ];
             }
 
-            $saldoKas = \App\Models\KasTransaksi::saldoSaatIni();
-            if ($validated['jumlah'] > $saldoKas) {
+            $errorKas = PinjamanService::pastikanKasCukup((float) $validated['jumlah']);
+            if ($errorKas) {
                 DB::rollBack();
-                return response()->json([
-                    'message' => 'Pengajuan tidak bisa diproses karena kas koperasi tidak mencukupi. Saldo kas saat ini hanya Rp ' . number_format($saldoKas, 0, ',', '.') . '.',
-                ], 422);
+                return response()->json(['message' => $errorKas], 422);
             }
 
             $pinjaman = $request->user()->pinjamans()->create([
@@ -285,25 +284,6 @@ class PinjamanController extends Controller
         return response()->json($pinjaman);
     }
 
-    private function pastikanTidakNumpukPinjamanAktif(Pinjaman $pinjaman): ?string
-    {
-        $query = Pinjaman::where('user_id', $pinjaman->user_id)
-            ->where('status', 'DISETUJUI')
-            ->where('id', '!=', $pinjaman->id);
-
-        if ($pinjaman->is_topup && $pinjaman->topup_dari_pinjaman_id) {
-            $query->where('id', '!=', $pinjaman->topup_dari_pinjaman_id);
-        }
-
-        $bentrok = $query->first();
-
-        if ($bentrok) {
-            return 'Anggota ini sudah punya pinjaman aktif lain #' . $bentrok->kode . ' yang belum lunas/tergabung. Tidak bisa ACC pengajuan ini sampai itu diselesaikan (lunasi, atau ajukan ulang sebagai Top-Up).';
-        }
-
-        return null;
-    }
-
     // POST /api/ketua/pinjaman/{id}/persetujuan -> Ketua approve final
     public function persetujuanKetua(Request $request, $id)
     {
@@ -315,7 +295,7 @@ class PinjamanController extends Controller
         ]);
 
         if ($validated['status'] === 'DISETUJUI') {
-            $pesanBentrok = $this->pastikanTidakNumpukPinjamanAktif($pinjaman);
+            $pesanBentrok = PinjamanService::pastikanTidakNumpukPinjamanAktif($pinjaman);
             if ($pesanBentrok) {
                 return response()->json(['message' => $pesanBentrok], 422);
             }
@@ -356,7 +336,7 @@ class PinjamanController extends Controller
             'catatan_verifikasi' => 'nullable|string',
         ]);
 
-        $pesanBentrok = $this->pastikanTidakNumpukPinjamanAktif($pinjaman);
+        $pesanBentrok = PinjamanService::pastikanTidakNumpukPinjamanAktif($pinjaman);
         if ($pesanBentrok) {
             return response()->json(['message' => $pesanBentrok], 422);
         }
@@ -462,22 +442,34 @@ class PinjamanController extends Controller
             return response()->json(['message' => 'Cicilan ini sudah tercatat lunas.'], 422);
         }
 
-        $cicilan->update([
-            'status' => 'LUNAS',
-            'tanggal_bayar' => now()->toDateString(),
-            'catatan' => $validated['catatan'],
-            'dibayar_oleh' => $request->user()->id,
-        ]);
+        DB::transaction(function () use ($request, $validated, $cicilan) {
+            $cicilan->update([
+                'status' => 'LUNAS',
+                'tanggal_bayar' => now()->toDateString(),
+                'catatan' => $validated['catatan'],
+                'dibayar_oleh' => $request->user()->id,
+            ]);
 
-        $pinjaman = $cicilan->pinjaman;
-        $masihAdaBelumLunas = $pinjaman->cicilans()->where('status', '!=', 'LUNAS')->exists();
-        if (!$masihAdaBelumLunas) {
-            $pinjaman->update(['status' => 'LUNAS']);
-        }
+            \App\Models\KasTransaksi::create([
+                'tipe' => 'MASUK',
+                'jumlah' => $cicilan->jumlah,
+                'catatan' => 'Pembayaran cicilan ke-' . $cicilan->cicilan_ke . ' pinjaman ' . $cicilan->pinjaman->kode,
+                'tanggal' => now()->toDateString(),
+                'dicatat_oleh' => $request->user()->id,
+            ]);
+
+            $pinjaman = $cicilan->pinjaman;
+            $masihAdaBelumLunas = $pinjaman->cicilans()->where('status', '!=', 'LUNAS')->exists();
+            if (!$masihAdaBelumLunas) {
+                $pinjaman->update(['status' => 'LUNAS']);
+            }
+        });
+
+        $cicilan->refresh();
 
         return response()->json([
-            'cicilan' => $cicilan->fresh(),
-            'pinjaman_status' => $pinjaman->fresh()->status,
+            'cicilan' => $cicilan,
+            'pinjaman_status' => $cicilan->pinjaman->fresh()->status,
         ]);
     }
 }

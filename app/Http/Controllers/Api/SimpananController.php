@@ -26,10 +26,6 @@ class SimpananController extends Controller
         ]);
     }
 
-    // POST /api/simpanan/tarik -> pages/simpananku.jsx (request tarik Simpanan Sukarela mandiri)
-    // Hanya Sukarela yang boleh ditarik mandiri oleh Anggota (Pokok & Wajib tidak
-    // bisa ditarik selama masih jadi anggota). Request masuk sebagai PENDING,
-    // baru benar-benar memotong saldo setelah dieksekusi/dikonfirmasi Bendahara.
     public function requestTarik(Request $request)
     {
         $validated = $request->validate([
@@ -39,11 +35,6 @@ class SimpananController extends Controller
 
         $user = $request->user();
 
-        // Dibungkus transaction + lock baris user, sama seperti pola di
-        // PinjamanController::store(). Tanpa ini, dua request tarik yang nyaris
-        // bersamaan (double-klik, atau dipanggil manual berkali-kali) bisa
-        // sama-sama lolos cek "saldo cukup?" sebelum salah satunya sempat
-        // commit ke DB -> saldo tersedia bisa jadi minus.
         $saldoKurang = null;
 
         $simpanan = DB::transaction(function () use ($user, $validated, &$saldoKurang) {

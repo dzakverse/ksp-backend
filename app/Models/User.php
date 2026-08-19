@@ -88,43 +88,26 @@ class User extends Authenticatable implements FilamentUser, HasName // <-- TAMBA
         });
     }
 
-    /**
-     * Interface Method dari HasName:
-     * Menyilakan Filament mengambil nama user dari kolom 'nama'
-     */
     public function getFilamentName(): string
     {
         return $this->nama ?? 'User KSP';
     }
 
-    /**
-     * Interface Method dari FilamentUser:
-     * Menentukan akun mana yang boleh mengakses Panel Super Admin Filament
-     */
     public function canAccessPanel(Panel $panel): bool
     {
         return $this->role === 'SUPER_ADMIN';
     }
 
-    /**
-     * Relasi ke Tabel Simpanan
-     */
     public function simpanans(): HasMany
     {
         return $this->hasMany(Simpanan::class, 'user_id');
     }
 
-    /**
-     * Relasi ke Tabel Pinjaman
-     */
     public function pinjamans(): HasMany
     {
         return $this->hasMany(Pinjaman::class, 'user_id');
     }
 
-    /**
-     * Helper Role Checking
-     */
     public function isSuperAdmin(): bool
     {
         return $this->role === 'SUPER_ADMIN';

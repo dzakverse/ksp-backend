@@ -32,9 +32,6 @@ class ProfileController extends Controller
         ]);
     }
 
-    // PUT /api/profile -> pages/edit.jsx (Anggota mengedit data kontak miliknya sendiri)
-    // Hanya field kontak yang boleh diubah mandiri; data identitas resmi (nama, NIK,
-    // NIP, tanggal lahir, dst) tetap harus lewat Bendahara/Ketua/Super Admin.
     public function update(Request $request)
     {
         $validated = $request->validate([
@@ -49,33 +46,20 @@ class ProfileController extends Controller
         return response()->json($user->fresh());
     }
 
-    // POST /api/profile/foto -> upload/ganti foto profil milik akun yang sedang
-    // login (Anggota, Bendahara, maupun Ketua - semua role pakai endpoint yang
-    // sama karena ini foto profil DIRI SENDIRI, bukan punya orang lain).
     public function updateFoto(Request $request)
     {
         $validated = $request->validate([
-            // 'image' memvalidasi file itu benar-benar gambar (bukan cuma cek
-            // ekstensi), jadi file berbahaya yang disamarkan pakai nama .jpg
-            // tetap ditolak. Dibatasi ke jpg/jpeg/png & maks 2MB sesuai yang
-            // sudah ditulis di UI ("Format JPG, PNG. Ukuran maks. 2MB.").
             'foto' => 'required|image|mimes:jpg,jpeg,png|max:2048',
         ]);
 
         $user = $request->user();
 
-        // Hapus file foto lama dari storage (kalau memang foto lama itu hasil
-        // upload lewat endpoint ini, ditandai dari path-nya), supaya file lama
-        // tidak menumpuk terus di server tiap kali user ganti foto.
         if ($user->foto_url && str_contains($user->foto_url, '/storage/foto-profil/')) {
             $pathLama = ltrim(parse_url($user->foto_url, PHP_URL_PATH), '/');
             $pathLama = preg_replace('#^storage/#', '', $pathLama);
             Storage::disk('public')->delete($pathLama);
         }
 
-        // store() otomatis generate nama file acak (hash) -> mencegah file
-        // saling menimpa antar user & mencegah user mengontrol nama file
-        // (path traversal / penamaan berbahaya).
         $path = $request->file('foto')->store('foto-profil', 'public');
 
         $user->update([
@@ -87,16 +71,10 @@ class ProfileController extends Controller
         ]);
     }
 
-    // DELETE /api/profile/foto -> hapus foto profil milik akun yang sedang
-    // login, balik ke tanpa-foto (FE akan otomatis nampilin avatar inisial
-    // dari nama begitu foto_url kosong - lihat components/Avatar.jsx).
     public function hapusFoto(Request $request)
     {
         $user = $request->user();
 
-        // Hanya hapus file fisik dari storage kalau memang foto itu hasil
-        // upload lewat endpoint ini (bukan URL eksternal/seed lain), sama
-        // seperti pengecekan yang sudah ada di updateFoto().
         if ($user->foto_url && str_contains($user->foto_url, '/storage/foto-profil/')) {
             $path = ltrim(parse_url($user->foto_url, PHP_URL_PATH), '/');
             $path = preg_replace('#^storage/#', '', $path);

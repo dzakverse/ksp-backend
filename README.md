@@ -1,37 +1,19 @@
-# Backend Starter — KSP Sejahtera (Laravel + MySQL)
+# Backend — KSP Sejahtera (Laravel + MySQL + Filament)
 
-File-file di sini adalah **kode siap-pakai**, bukan project Laravel penuh (composer
-tidak bisa dijalankan di sandbox ini). Ikuti langkah di bawah untuk memasangnya.
+Backend Laravel untuk aplikasi koperasi simpan pinjam. Dua permukaan akses:
 
-## 1. Buat project Laravel baru
+- **REST API** (`routes/api.php`, prefix `/api/...`) — dipakai FE React (Anggota/Bendahara/Ketua).
+- **Panel Admin Filament** di `/admin` — khusus role `SUPER_ADMIN`, dipakai untuk audit & operasional darurat.
+
+## 1. Instalasi
 
 ```bash
-composer create-project laravel/laravel ksp-backend
-cd ksp-backend
-composer require laravel/sanctum
+composer install
+cp .env.example .env
+php artisan key:generate
 ```
 
-## 2. Salin file dari folder ini ke project Laravel
-
-| Dari folder ini                          | Ke project Laravel                              |
-|-------------------------------------------|--------------------------------------------------|
-| `database/migrations/*.php`               | `database/migrations/`                            |
-| `app/Models/*.php`                        | `app/Models/`                                     |
-| `app/Http/Controllers/Api/*.php`          | `app/Http/Controllers/Api/`                       |
-| `app/Http/Middleware/CheckRole.php`       | `app/Http/Middleware/`                            |
-| `routes/api.php`                          | `routes/api.php` (replace/merge)                  |
-
-## 3. Daftarkan middleware `role`
-
-Di `bootstrap/app.php` (Laravel 11+), tambahkan di dalam `->withMiddleware()`:
-
-```php
-$middleware->alias([
-    'role' => \App\Http\Middleware\CheckRole::class,
-]);
-```
-
-## 4. Setup .env & database
+## 2. Setup `.env` & database
 
 ```env
 DB_CONNECTION=mysql
@@ -46,13 +28,13 @@ SESSION_DOMAIN=localhost
 FRONTEND_URL=http://localhost:5173
 ```
 
-Buat database `ksp_sejahtera` di MySQL, lalu:
+Buat database `ksp_sejahtera` di MySQL (pastikan servernya jalan), lalu:
 
 ```bash
 php artisan migrate
 ```
 
-## 5. Aktifkan CORS (WAJIB biar FE bisa akses)
+## 3. Aktifkan CORS (WAJIB biar FE bisa akses)
 
 Publish config CORS bawaan Laravel lalu edit `config/cors.php`:
 
@@ -64,7 +46,7 @@ Publish config CORS bawaan Laravel lalu edit `config/cors.php`:
 'supports_credentials' => true,
 ```
 
-## 6. Seeder akun + data demo (biar Beranda/Simpananku/Pinjaman/Profil langsung keisi)
+## 4. Seeder akun + data demo
 
 ```bash
 php artisan tinker
@@ -81,6 +63,8 @@ $anggota = \App\Models\User::create([
 \App\Models\User::create(['nip' => 'anggota2', 'password' => bcrypt('123'), 'nama' => 'Siti Aminah, M.Si', 'role' => 'ANGGOTA', 'unit_kerja' => 'Rehabilitasi Sosial']);
 \App\Models\User::create(['nip' => 'bendahara', 'password' => bcrypt('123'), 'nama' => 'Siti Aminah', 'role' => 'BENDAHARA']);
 \App\Models\User::create(['nip' => 'ketua', 'password' => bcrypt('123'), 'nama' => 'Drs. H. Ahmad', 'role' => 'KETUA']);
+// Akun panel admin Filament (/admin) - HARUS role SUPER_ADMIN, role lain ditolak di CustomLogin
+\App\Models\User::create(['nip' => 'superadmin', 'password' => bcrypt('123'), 'nama' => 'Super Admin', 'role' => 'SUPER_ADMIN']);
 
 // Data simpanan contoh
 $anggota->simpanans()->create(['jenis' => 'POKOK', 'tipe' => 'SETOR', 'jumlah' => 500000, 'tanggal' => '2021-01-15', 'keterangan' => 'Setoran awal keanggotaan']);
@@ -90,7 +74,7 @@ $anggota->simpanans()->create(['jenis' => 'SUKARELA', 'tipe' => 'TARIK', 'jumlah
 
 // Data pinjaman contoh (langsung DISETUJUI biar keliatan di card "Pinjaman Aktif")
 $pinjaman = $anggota->pinjamans()->create([
-    'kode' => 'LN-2026-001', 'jumlah' => 5000000, 'tenor_bulan' => 12,
+    'kode' => 'LN-2026-001', 'jumlah' => 5000000, 'tenor_bulan' => 12, 'sisa_pokok' => 5000000,
     'alasan' => 'Kebutuhan mendesak', 'status' => 'DISETUJUI',
 ]);
 $pinjaman->cicilans()->create(['cicilan_ke' => 1, 'jumlah' => 458333, 'jatuh_tempo' => '2026-08-01', 'tanggal_bayar' => '2026-08-01', 'status' => 'LUNAS']);
@@ -98,45 +82,80 @@ $pinjaman->cicilans()->create(['cicilan_ke' => 1, 'jumlah' => 458333, 'jatuh_tem
 // Pengajuan baru yang masih MENUNGGU verifikasi, biar antrean Bendahara ada isinya
 $anggota2 = \App\Models\User::where('nip', 'anggota2')->first();
 $anggota2->pinjamans()->create([
-    'kode' => 'LN-2026-002', 'jumlah' => 25000000, 'tenor_bulan' => 24,
+    'kode' => 'LN-2026-002', 'jumlah' => 25000000, 'tenor_bulan' => 24, 'sisa_pokok' => 25000000,
     'alasan' => 'Renovasi Rumah', 'status' => 'MENUNGGU',
 ]);
+
+// Kas awal koperasi (opsional, biar saldo kas tidak 0 di /api/kas/saldo & panel admin)
+\App\Models\KasTransaksi::create(['tipe' => 'MASUK', 'jumlah' => 50000000, 'catatan' => 'Setoran modal awal koperasi', 'tanggal' => now(), 'dicatat_oleh' => null]);
 ```
 
-## 7. Jalankan server
+## 5. Jalankan server
 
 ```bash
 php artisan serve
 # -> http://127.0.0.1:8000
 ```
 
-API sekarang bisa diakses di `http://127.0.0.1:8000/api/...` — lihat `routes/api.php`
-untuk daftar lengkap endpoint dan halaman FE mana yang memakainya.
+- API: `http://127.0.0.1:8000/api/...`
+- Panel Admin (Filament, `SUPER_ADMIN` saja): `http://127.0.0.1:8000/admin`
 
-## Endpoint yang sudah dibuatkan
+## Struktur kode penting
 
-| Method | Endpoint                              | Dipakai di FE                          | Role         |
-|--------|-----------------------------------------|-----------------------------------------|--------------|
-| POST   | /api/login                              | pages/login.jsx                         | public       |
-| GET    | /api/me                                 | validasi token saat reload              | semua login  |
-| POST   | /api/logout                             | tombol logout                           | semua login  |
-| GET    | /api/dashboard                          | pages/dashboard.jsx (Beranda)           | ANGGOTA      |
-| GET    | /api/simpanan                           | pages/simpananku.jsx                    | ANGGOTA      |
-| GET    | /api/pinjaman                           | pages/pinjaman.jsx                      | ANGGOTA      |
-| GET    | /api/profile                            | pages/profil.jsx (semua role)           | semua login  |
-| POST   | /api/pinjaman                           | pages/ajukan.jsx                        | ANGGOTA      |
-| POST   | /api/change-password                    | UbahPassword.jsx (semua role)           | semua login  |
-| GET    | /api/admin/dashboard                    | bendahara/DashboardBendahara.jsx        | BENDAHARA/KETUA |
-| GET    | /api/admin/anggota                      | bendahara/DataAnggota.jsx               | BENDAHARA/KETUA |
-| GET    | /api/admin/anggota/{id}                 | bendahara/DetailAnggota.jsx             | BENDAHARA/KETUA |
-| POST   | /api/admin/anggota/{id}/simpanan        | bendahara/DetailAnggota.jsx (form)      | BENDAHARA/KETUA |
-| PATCH  | /api/admin/anggota/{id}/status          | bendahara/DetailAnggota.jsx (toggle)    | BENDAHARA/KETUA |
-| GET    | /api/admin/pinjaman                     | bendahara/VerifikasiPinjaman.jsx        | BENDAHARA/KETUA |
-| GET    | /api/admin/pinjaman/{id}                | bendahara/VerifikasiDetail.jsx          | BENDAHARA/KETUA |
-| POST   | /api/admin/pinjaman/{id}/verifikasi     | bendahara/VerifikasiDetail.jsx          | BENDAHARA/KETUA |
-| POST   | /api/ketua/pinjaman/{id}/persetujuan    | ketua/PersetujuanPinjaman.jsx           | KETUA        |
+| Path | Isi |
+|---|---|
+| `app/Http/Controllers/Api/*.php` | Controller REST API, dipakai FE React |
+| `app/Filament/Resources/*.php` | Resource panel admin (`/admin`) — User, Pinjaman, Simpanan, KasTransaksi, dst |
+| `app/Filament/Pages/CustomLogin.php` | Halaman login panel admin — validasi role `SUPER_ADMIN` + rate limiting |
+| `app/Services/PinjamanService.php` | Aturan SOP pinjaman (cek numpuk pinjaman aktif, cek kas cukup, default suku bunga) — dipakai bareng oleh API dan Filament supaya aturannya konsisten di semua jalur |
+| `app/Models/*.php` | Eloquent model + business rule inti (mis. `Pinjaman::generateCicilanSchedule()`, `KasTransaksi::saldoSaatIni()`) |
 
-Halaman Ketua yang belum dibuatkan endpoint-nya (menyusul di tahap berikutnya):
-`EmergencyBypass.jsx`, `KendaliKebijakan.jsx`, `PengurusAnggota.jsx`, tab "Bypass" di
-`PersetujuanPinjaman.jsx`, dan Audit Log Tracker di `DashboardKetua.jsx`. Pola controller
-di atas bisa langsung dicontek untuk bikin endpoint-endpoint tersebut nanti.
+## Endpoint API
+
+| Method | Endpoint | Dipakai di FE | Role |
+|---|---|---|---|
+| POST | `/api/login` | `pages/login.jsx` | public (throttle 5/menit) |
+| GET | `/api/me` | validasi token saat reload | semua login |
+| POST | `/api/logout` | tombol logout | semua login |
+| POST | `/api/change-password` | `UbahPassword*.jsx` | semua login |
+| GET | `/api/dashboard` | `pages/dashboard.jsx` (Beranda) | ANGGOTA |
+| GET | `/api/simpanan` | `pages/simpananku.jsx` | ANGGOTA |
+| POST | `/api/simpanan/tarik` | `pages/simpananku.jsx` (ajukan tarik) | ANGGOTA |
+| GET | `/api/pinjaman` | `pages/pinjaman.jsx` | ANGGOTA |
+| POST | `/api/pinjaman` | `pages/ajukan.jsx` (baru & top-up) | ANGGOTA |
+| GET | `/api/profile` / PUT `/api/profile` | `pages/profil.jsx` | semua login |
+| POST/DELETE | `/api/profile/foto` | `pages/profil.jsx` | semua login |
+| GET | `/api/kebijakan` | form Ajukan Pinjaman (cek plafon) | semua login |
+| GET | `/api/kas/saldo` | form Ajukan Pinjaman (cek kas cukup) | semua login |
+| GET | `/api/admin/dashboard` | `admin/DashboardBendahara.jsx` | BENDAHARA/KETUA |
+| GET | `/api/admin/anggota`, `/api/admin/anggota/{id}` | `admin/DataAnggota.jsx`, `admin/DetailAnggota.jsx` | BENDAHARA/KETUA |
+| POST | `/api/admin/anggota/{id}/simpanan` (+`/tarik`) | `admin/DetailAnggota.jsx` | BENDAHARA/KETUA |
+| PATCH | `/api/admin/anggota/{id}/status` | `admin/DetailAnggota.jsx` | BENDAHARA/KETUA |
+| GET | `/api/admin/simpanan/pending`, POST `/konfirmasi` | konfirmasi tarik simpanan | BENDAHARA/KETUA |
+| GET | `/api/admin/pinjaman`, `/{id}` | `admin/VerifikasiPinjaman.jsx`, `VerifikasiDetail.jsx` | BENDAHARA/KETUA |
+| POST | `/api/admin/pinjaman/{id}/verifikasi` | `admin/VerifikasiDetail.jsx` | BENDAHARA/KETUA |
+| POST | `/api/admin/cicilan/{cicilan}/bayar` | catat pembayaran cicilan | BENDAHARA/KETUA |
+| GET | `/api/admin/kas`, POST `/api/admin/kas/tarik` | `admin/KasKoperasi.jsx` | BENDAHARA/KETUA |
+| POST | `/api/ketua/pinjaman/{id}/persetujuan` | `ketua/PersetujuanPinjaman.jsx` | KETUA |
+| POST | `/api/ketua/pinjaman/{id}/restrukturisasi` | restrukturisasi pinjaman aktif | KETUA |
+| GET | `/api/ketua/pinjaman/bypass-queue`, POST `/{id}/bypass` | `ketua/EmergencyBypass.jsx` | KETUA |
+| GET/PUT | `/api/ketua/kebijakan` | `ketua/KendaliKebijakan.jsx` | KETUA |
+| GET/POST/PATCH | `/api/ketua/pengurus...` | `ketua/PengurusAnggota.jsx` | KETUA |
+
+## Panel Admin (Filament, `/admin`)
+
+Login khusus NIP + password dengan role `SUPER_ADMIN` (role lain ditolak & di-logout otomatis di `CustomLogin`). Resource yang tersedia: **User**, **Pinjaman**, **Simpanan**, **Kas Koperasi**.
+
+Panel ini dipakai untuk *audit & operasional darurat* (mis. koreksi data, approve manual lewat action **Bypass Approval**), **bukan** jalur produksi utama untuk pengajuan pinjaman baru — jalur normal tetap lewat API (`ajukan.jsx` → alur verifikasi Bendahara/Ketua).
+
+Aturan SOP yang sudah ditarik ke `PinjamanService` dan berlaku di panel ini juga (bukan cuma di API):
+- Anggota tidak boleh punya 2 pinjaman `DISETUJUI` sekaligus (kecuali sedang top-up dari pinjaman itu sendiri).
+- Kas koperasi harus cukup untuk mencairkan nominal pinjaman.
+- Suku bunga default ikut `Kebijakan::current()`, bukan hardcode 0%.
+- `jumlah`/`tenor_bulan` pinjaman yang sudah punya jadwal cicilan tidak bisa diedit langsung (jadwalnya tidak ikut ter-update) — gunakan Restrukturisasi.
+- "Kas Keluar" di `KasTransaksiResource` diblokir kalau saldo kas tidak cukup, sama seperti `KasController::tarik()` di API.
+- Login panel dibatasi 5x percobaan gagal per menit per NIP+IP.
+
+## Catatan bug yang sudah diperbaiki
+
+`PinjamanController::bayarCicilan()` sekarang mencatat `KasTransaksi` tipe `MASUK` setiap kali sebuah cicilan dibayar lunas. Sebelumnya, `KasTransaksi::saldoSaatIni()` mengurangi penuh nominal setiap pinjaman `DISETUJUI` dari saldo kas tapi tidak pernah ada entri balik saat dicicil — akibatnya saldo kas yang ditampilkan (API maupun panel admin) makin lama makin jauh dari kas riil koperasi.

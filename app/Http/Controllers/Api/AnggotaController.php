@@ -29,10 +29,6 @@ class AnggotaController extends Controller
 
         $paginated = $query->orderBy('nama')->paginate($perPage);
 
-        // Saldo semua anggota di halaman ini diambil dalam 1 query agregat
-        // (Simpanan::breakdownSaldoBanyakUser), bukan 4 query manual per anggota
-        // seperti sebelumnya -> untuk per_page=50 itu penghematan dari ~200
-        // query jadi 1 query.
         $userIds = collect($paginated->items())->pluck('id');
         $saldoPerUser = Simpanan::breakdownSaldoBanyakUser($userIds);
 

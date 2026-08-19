@@ -12,11 +12,6 @@ use App\Http\Controllers\Api\PinjamanController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\SimpananController;
 
-// ============ PUBLIC ============
-// throttle:5,1 -> maksimal 5 percobaan login per menit PER IP, terpisah dari
-// throttle default grup 'api' (60/menit) yang terlalu longgar untuk endpoint
-// auth. Mencegah brute-force NIP+password. Kalau kena limit, Laravel otomatis
-// balas 429 Too Many Requests.
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
 
 // ============ PROTECTED (butuh token Sanctum) ============
