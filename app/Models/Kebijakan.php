@@ -10,6 +10,7 @@ class Kebijakan extends Model
     protected $fillable = [
         'plafon_maksimal',
         'suku_bunga_persen',
+        'simpanan_pokok_nominal',
         'simpanan_wajib_nominal',
         'minimal_progress_topup_persen',
         'catatan_terakhir',
@@ -21,6 +22,7 @@ class Kebijakan extends Model
         return [
             'plafon_maksimal' => 'decimal:2',
             'suku_bunga_persen' => 'decimal:2',
+            'simpanan_pokok_nominal' => 'decimal:2',
             'simpanan_wajib_nominal' => 'decimal:2',
             'minimal_progress_topup_persen' => 'decimal:2',
         ];

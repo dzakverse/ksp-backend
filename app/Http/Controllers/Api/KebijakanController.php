@@ -20,6 +20,7 @@ class KebijakanController extends Controller
         $validated = $request->validate([
             'plafon_maksimal' => 'sometimes|numeric|min:0',
             'suku_bunga_persen' => 'sometimes|numeric|min:0|max:100',
+            'simpanan_pokok_nominal' => 'sometimes|numeric|min:0',
             'simpanan_wajib_nominal' => 'sometimes|numeric|min:0',
             'minimal_progress_topup_persen' => 'sometimes|numeric|min:0|max:100',
             'catatan_terakhir' => 'nullable|string',

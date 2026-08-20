@@ -3,6 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\SimpananResource\Pages;
+use App\Models\Kebijakan;
 use App\Models\Simpanan;
 use App\Models\User;
 use Filament\Forms;
@@ -83,20 +84,38 @@ class SimpananResource extends Resource
                                 ->required()
                                 ->minValue(0)
                                 ->helperText(function (Get $get): ?string {
-                                    if ($get('tipe') !== 'TARIK' || ! $get('user_id') || ! $get('jenis')) {
+                                    if ($get('tipe') === 'TARIK') {
+                                        if (! $get('user_id') || ! $get('jenis')) {
+                                            return null;
+                                        }
+                                        $saldo = self::saldoTersedia((int) $get('user_id'), $get('jenis'));
+                                        return 'Saldo ' . $get('jenis') . ' tersedia saat ini: Rp ' . number_format($saldo, 0, ',', '.');
+                                    }
+
+                                    $minimal = self::minimalSetoran($get('jenis'));
+                                    if ($minimal === null) {
                                         return null;
                                     }
-                                    $saldo = self::saldoTersedia((int) $get('user_id'), $get('jenis'));
-                                    return 'Saldo ' . $get('jenis') . ' tersedia saat ini: Rp ' . number_format($saldo, 0, ',', '.');
+                                    return 'Minimal setoran ' . $get('jenis') . ' sesuai kebijakan: Rp ' . number_format($minimal, 0, ',', '.');
                                 })
                                 ->rules([
                                     fn (Get $get): \Closure => function (string $attribute, $value, \Closure $fail) use ($get) {
-                                        if ($get('tipe') !== 'TARIK' || ! $get('user_id') || ! $get('jenis')) {
+                                        if ($get('tipe') === 'TARIK') {
+                                            if (! $get('user_id') || ! $get('jenis')) {
+                                                return;
+                                            }
+                                            $saldo = self::saldoTersedia((int) $get('user_id'), $get('jenis'));
+                                            if ((float) $value > $saldo) {
+                                                $fail('Jumlah melebihi saldo tersedia (Rp ' . number_format($saldo, 0, ',', '.') . ').');
+                                            }
                                             return;
                                         }
-                                        $saldo = self::saldoTersedia((int) $get('user_id'), $get('jenis'));
-                                        if ((float) $value > $saldo) {
-                                            $fail('Jumlah melebihi saldo tersedia (Rp ' . number_format($saldo, 0, ',', '.') . ').');
+
+                                        // SETOR: nominal tidak boleh di bawah minimal kebijakan
+                                        // untuk simpanan pokok/wajib yang ditetapkan Ketua.
+                                        $minimal = self::minimalSetoran($get('jenis'));
+                                        if ($minimal !== null && (float) $value < $minimal) {
+                                            $fail('Jumlah setoran ' . $get('jenis') . ' minimal Rp ' . number_format($minimal, 0, ',', '.') . ' sesuai kebijakan.');
                                         }
                                     },
                                 ]),
@@ -236,6 +255,23 @@ class SimpananResource extends Resource
             'create' => Pages\CreateSimpanan::route('/create'),
             'edit' => Pages\EditSimpanan::route('/{record}/edit'),
         ];
+    }
+
+    /**
+     * Ambil nominal minimal setoran dari kebijakan aktif untuk jenis POKOK/WAJIB.
+     * SUKARELA tidak punya batas minimal (sifatnya sukarela).
+     */
+    private static function minimalSetoran(?string $jenis): ?float
+    {
+        if (! in_array($jenis, ['POKOK', 'WAJIB'], true)) {
+            return null;
+        }
+
+        $kebijakan = Kebijakan::current();
+
+        return $jenis === 'POKOK'
+            ? (float) $kebijakan->simpanan_pokok_nominal
+            : (float) $kebijakan->simpanan_wajib_nominal;
     }
 
     private static function saldoTersedia(int $userId, string $jenis): float
