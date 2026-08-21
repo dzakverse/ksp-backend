@@ -37,4 +37,16 @@ class Kebijakan extends Model
     {
         return static::firstOrCreate([]);
     }
+    public static function minimalSetoran(?string $jenis): ?float
+    {
+        if (! in_array($jenis, ['POKOK', 'WAJIB'], true)) {
+            return null;
+        }
+
+        $kebijakan = static::current();
+
+        return $jenis === 'POKOK'
+            ? (float) $kebijakan->simpanan_pokok_nominal
+            : (float) $kebijakan->simpanan_wajib_nominal;
+    }
 }

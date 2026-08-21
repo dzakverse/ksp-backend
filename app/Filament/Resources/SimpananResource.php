@@ -257,21 +257,9 @@ class SimpananResource extends Resource
         ];
     }
 
-    /**
-     * Ambil nominal minimal setoran dari kebijakan aktif untuk jenis POKOK/WAJIB.
-     * SUKARELA tidak punya batas minimal (sifatnya sukarela).
-     */
     private static function minimalSetoran(?string $jenis): ?float
     {
-        if (! in_array($jenis, ['POKOK', 'WAJIB'], true)) {
-            return null;
-        }
-
-        $kebijakan = Kebijakan::current();
-
-        return $jenis === 'POKOK'
-            ? (float) $kebijakan->simpanan_pokok_nominal
-            : (float) $kebijakan->simpanan_wajib_nominal;
+        return Kebijakan::minimalSetoran($jenis);
     }
 
     private static function saldoTersedia(int $userId, string $jenis): float

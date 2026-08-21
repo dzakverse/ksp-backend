@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Kebijakan;
 use App\Models\Simpanan;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -99,12 +100,21 @@ class AnggotaController extends Controller
         ]);
     }
 
-    // POST /api/admin/anggota/{anggota}/simpanan -> form "Tambah Simpanan Manual"
     public function storeSimpanan(Request $request, User $anggota)
     {
         $validated = $request->validate([
             'jenis' => 'required|in:POKOK,WAJIB,SUKARELA',
-            'jumlah' => 'required|numeric|min:1',
+            'jumlah' => [
+                'required',
+                'numeric',
+                'min:1',
+                function (string $attribute, $value, \Closure $fail) use ($request) {
+                    $minimal = Kebijakan::minimalSetoran($request->input('jenis'));
+                    if ($minimal !== null && (float) $value < $minimal) {
+                        $fail('Jumlah setoran ' . $request->input('jenis') . ' minimal Rp ' . number_format($minimal, 0, ',', '.') . ' sesuai kebijakan.');
+                    }
+                },
+            ],
             'keterangan' => 'nullable|string',
         ]);
 
@@ -131,8 +141,6 @@ class AnggotaController extends Controller
         return response()->json(['status_keanggotaan' => $anggota->status_keanggotaan]);
     }
 
-    // POST /api/admin/anggota/{anggota}/simpanan/tarik -> Bendahara/Ketua tarik simpanan langsung
-    // (semua jenis: POKOK, WAJIB, SUKARELA - dengan pengecekan saldo cukup)
     public function tarikSimpanan(Request $request, User $anggota)
     {
         $validated = $request->validate([
@@ -141,11 +149,6 @@ class AnggotaController extends Controller
             'keterangan' => 'nullable|string',
         ]);
 
-        // Dibungkus transaction + lock baris anggota, sama seperti pola di
-        // PinjamanController::store() & SimpananController::requestTarik(),
-        // supaya dua penarikan nyaris bersamaan (mis. dua pengurus, atau
-        // double-klik) tidak sama-sama lolos cek saldo sebelum salah satunya
-        // commit -> saldo anggota bisa jadi minus.
         $saldoKurang = null;
 
         $simpanan = DB::transaction(function () use ($request, $anggota, $validated, &$saldoKurang) {
